@@ -1,0 +1,14 @@
+{
+    "peers": [
+        {
+            "peerId": "39d1e4c943bd75305dc9ab5e973284f1a4219a0e5c79f57f2b642c918a0bce59",
+            "publicIp": "90.565.34.123",
+            "publicPort": "12312"
+        },
+        {
+            "peerId": "a71fbd3e12f648c4c9eaf81e0e9b0ec69cf3d9e8120472d0a5c7b1a46f5d3c8e",
+            "publicIp": "23.32.23.123",
+            "publicPort": "8086"
+        }
+    ]
+}
