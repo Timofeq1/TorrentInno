@@ -6,17 +6,17 @@
     "name": "FunnyVideo.mp4",
     "pieces": [
         {
-            "sha512": "9b71d224bd62f3785d96d46ad3ea3d73319bfbc2890caadae2dff72519673ca72323c3d99ba5c11d7c7acc6e14b8c5da0c4663475c2e5c3adef46f73bcdec043",
+            "sha256": "6b8a2d7f30c9e8d9b3d5b7c61e0be67d48280f58ffefae3c8b8423fe7108ecb",
             "size": 1048576
         },
         {
-            "sha512": "1536769a070df5fe9aab5ea106c13f0448eecdbee67753f52ed86faf836098da81313bd3bfdc4d568c27582afa78f9bbedbf19a1714ee32b516c5c2ca468561e",
+            "sha256": "aabf67d072b5124a8c618a125054ea92c79a0cc489fdbb2d8f9acb68e9d6fd6",
             "size": 1048576
         },
         {
-            "sha512": "3831a6a6155e509dee59a7f451eb35324d8f8f2df6e3708894740f98fdee23889f4de5adb0c5010dfb555cda77c8ab5dc902094c52de3278f35a75ebc25f093a",
+            "sha256": "d432e67ffb96a5e742ab6d396bf52b41c4b960a5609871d4a477ad879d8a3c0",
             "size": 26071
         }
     ],
-    "fileSha512": "db9b1cd3262dee37756a09b9064973589847caa8e53d31a9d142ea2701b1b28abd97838bb9a27068ba305dc8d04a45a1fcf079de54d607666996b3cc54f6b67c"
+    "fileSha256": "8a517f0f321567c047f1a1e20c35d7f8a2a083f32045a9d98f8ff14f0b5f350"
 }
