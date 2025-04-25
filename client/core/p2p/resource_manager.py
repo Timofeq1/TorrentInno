@@ -119,13 +119,12 @@ class ResourceManager(ConnectionListener):
                 self.resource.pieces[piece_index].size_bytes
             )
         )
-        await asyncio.sleep(60) # Sleep 1 minute
+        await asyncio.sleep(60)  # Sleep 1 minute
         if self._piece_status[piece_index] == ResourceManager.PieceStatus.IN_PROGRESS:
             # If after one minute, the piece is still in progress,
             # then something is wrong with peer (slow download speed or smth)
-            self._peer_in_charge[piece_index] = '' # This peer is no more responsible for this piece
+            self._peer_in_charge[piece_index] = ''  # This peer is no more responsible for this piece
             self._piece_status[piece_index] = ResourceManager.PieceStatus.FREE
-
 
     async def _download_loop(self):
         works = set()
@@ -170,11 +169,13 @@ class ResourceManager(ConnectionListener):
 
         # These fields are needed for download
         self._free_peers: set[str] = set()
-        self._piece_status: list[ResourceManager.PieceStatus] =\
+        self._piece_status: list[ResourceManager.PieceStatus] = \
             [ResourceManager.PieceStatus.FREE] * len(self.resource.pieces)
         # Current peer that handles this piece
         self._peer_in_charge: list[str] = [''] * len(self.resource.pieces)
         self._download_task: asyncio.Task | None = None
+
+    # PUBLIC METHODS:
 
     async def open_public_port(self) -> int:
         # Start accepting peer connections on some random port

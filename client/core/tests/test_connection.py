@@ -27,6 +27,8 @@ async def get_connections(resource: Resource) -> (Connection, Connection):
 
 @pytest.mark.asyncio
 async def test_connection():
+    print()
+
     connections = await get_connections(mock_resource)
     sender: Connection = connections[0]
     receiver: Connection = connections[1]
@@ -52,8 +54,10 @@ async def test_connection():
         async def on_close(self, cause):
             print(f"ReceiverListener; onClose: {cause}")
 
-    sender.add_listener(SenderListener())
-    receiver.add_listener(ReceiverListener())
+    sender_listener = SenderListener()
+    receiver_listener = ReceiverListener()
+    sender.add_listener(sender_listener)
+    receiver.add_listener(receiver_listener)
 
     await receiver.listen()
     await sender.listen()
@@ -61,4 +65,7 @@ async def test_connection():
     await sender.send_message(mock_request)
     await receiver.send_message(mock_piece)
     await receiver.send_message(mock_bitfield)
+
+    await sender.close()
+    await receiver.close()
 

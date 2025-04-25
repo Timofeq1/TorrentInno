@@ -7,11 +7,12 @@ mock_resource = Resource(
     tracker_ip="127.0.0.1",
     tracker_port=8080,
     comment="Test torrent for unit testing",
-    creation_date=datetime.datetime.now(),
+    creation_date=datetime.datetime(2025, 4, 26, 15, 30, 0),
     name="sample_file.txt",
     pieces=[
-        Resource.Piece(sha256="a" * 64, size_bytes=512 * 1024),  # 512 KB
-        Resource.Piece(sha256="b" * 64, size_bytes=256 * 1024),  # 256 KB
+        Resource.Piece(sha256="a" * 64, size_bytes=512),
+        Resource.Piece(sha256="b" * 64, size_bytes=1500),
+        Resource.Piece(sha256="c" * 64, size_bytes=768)
     ]
 )
 
