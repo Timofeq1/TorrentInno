@@ -2,7 +2,7 @@ from core.p2p.message import Message, Request, Piece, Bitfield
 
 
 class ConnectionListener:
-    async def on_request(self, request: Request) -> bytes:
+    async def on_request(self, request: Request):
         pass
 
     async def on_piece(self, piece: Piece):
