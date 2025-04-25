@@ -35,12 +35,13 @@ If the handshake is successful, then both peers create and maintain a separate c
 Each message has the following format: `[body-length (4 bytes)][message-body]`. Where `body-length` is the length of the `[message-body]` (in bytes). Further, only `[message-body]` will be discussed.
 
 Each `[message-body]` has the following format: `[message-type (1 byte)][message-data]`. `[message-type]` is a number (`0x01`, for example)
-Currently, only two types of messages are supported:
+Currently, 4 message types are supported
 1) 'Request':  The `[message-data]` has format: `[piece-index (4 bytes)][piece-inner-offset (4 bytes)][block-length (4 bytes)]`. 
 This message indicates that the peer wants to fetch the `[block-length]` bytes from the piece with index `[piece-index]`, with inner offset within the piece of length `[piece-inner-offset]` bytes.
 
 2) 'Piece': The `[message-data]` has format: `[piece-index (4 bytes)][piece-inner-offset (4 bytes)][block-length (4 bytes)]data`. The first three fields has the same meaning as in the 'Request' message. The `data` contains the requested part of the file and it must have the length of `block-length` bytes.
 
+3) 'Bitfield': The `[message-data]` has format `[bitfield]`. The first byte corresponds to whether the sender has pieces 0-7 from high bit to low bit. The next byte corresponds to whether the sender has pieces 8-15 etc. Spare bits at the end are set to zero. Peers exchange the `Bitfield` message with each other to indicate the updates in the chunks ownership.
 *Example:*
 The full message to request 1024 bytes with offset 384 bytes offset within the piece 19 looks like this:
 
