@@ -48,7 +48,10 @@ class Connection:
                     request = Request(piece_index, piece_inner_offset, block_length)
 
                     # Notify listeners
-                    await asyncio.gather(*(listener.on_request(request) for listener in self.listeners))
+                    await asyncio.gather(
+                        *(listener.on_request(request) for listener in self.listeners),
+                        return_exceptions=True
+                    )
                 elif message_type == 2:
                     # Piece message
 
@@ -65,8 +68,11 @@ class Connection:
 
                     piece = Piece(piece_index, piece_inner_offset, block_length, data)
 
-                    # Notify listeners
-                    await asyncio.gather(*(listener.on_piece(piece) for listener in self.listeners))
+                    # Notify the listeners
+                    await asyncio.gather(
+                        *(listener.on_piece(piece) for listener in self.listeners),
+                        return_exceptions=True
+                    )
                 elif message_type == 3:
                     # Bitfield message
 
@@ -80,13 +86,18 @@ class Connection:
                         has_piece_i = bool((bytes_parsed[i // 8] >> (7 - i % 8)) & 1)
                         bitfield.bitfield[i] = has_piece_i
 
-                    # Notify listeners
-                    await asyncio.gather(*(listener.on_bitfield(bitfield) for listener in self.listeners))
+                    # Notify the listeners
+                    await asyncio.gather(
+                        *(listener.on_bitfield(bitfield) for listener in self.listeners),
+                        return_exceptions=True
+                    )
 
         except Exception as e:
             # For now close the connection in case of any exception
-            for listener in self.listeners:
-                await listener.on_close(e)
+            await asyncio.gather(
+                *(listener.on_close(e) for listener in self.listeners),
+                return_exceptions=True
+            )
         finally:
             self.writer.close()
             await self.writer.wait_closed()
@@ -96,8 +107,9 @@ class Connection:
         await self.writer.drain()
 
     async def listen(self):
-        loop = asyncio.get_running_loop()
-        self._listen_on_reader_task = loop.create_task(self._listen_on_reader())
+        if self._listen_on_reader_task is None:
+            loop = asyncio.get_running_loop()
+            self._listen_on_reader_task = loop.create_task(self._listen_on_reader())
 
     async def close(self):
         if self._listen_on_reader_task is not None:
@@ -109,20 +121,23 @@ class Connection:
 
 # Create the connection with some peer
 async def establish_connection(
-        host_peer: PeerInfo,
-        receiver_peer: PeerInfo,
+        host_peer_id: str,
+        destination_peer: PeerInfo,
         resource: Resource
-) -> (asyncio.StreamReader, asyncio.StreamWriter):
-    reader, writer = await asyncio.open_connection(host_peer.public_ip, receiver_peer.public_port)
+) -> Connection:
+    reader, writer = await asyncio.open_connection(destination_peer.public_ip, destination_peer.public_port)
 
+    info_hash = resource.get_info_hash()
+    handshake = Handshake(host_peer_id, info_hash)
     try:
-        info_hash = resource.get_info_hash()
-        handshake = Handshake(host_peer.peer_id, info_hash)
         writer.write(handshake.to_bytes())
-        response = await reader.read(74)
+        response = await reader.readexactly(75)
         assert response[0:11].decode() == 'TorrentInno'
-        assert response[11:43].hex() == info_hash
+        assert response[11:43].hex() == destination_peer.peer_id
         assert response[43:75].hex() == info_hash
-    finally:
+    except Exception:
         writer.close()
         await writer.wait_closed()
+        raise  # re-raise the error
+
+    return Connection(reader, writer, resource)

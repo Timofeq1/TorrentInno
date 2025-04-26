@@ -21,7 +21,7 @@ class Handshake(Message):
     info_hash: str
 
     def to_bytes(self) -> bytes:
-        return b'TorrentInno' + bytes.fromhex(self.peer_id) + bytes.fromhex(self.info_hash)
+        return "TorrentInno".encode() + bytes.fromhex(self.peer_id) + bytes.fromhex(self.info_hash)
 
 
 @dataclass

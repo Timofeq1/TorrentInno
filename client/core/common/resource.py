@@ -22,6 +22,5 @@ class Resource:
         path_part = ','.join(f'Path(sha256={piece.sha256},size_bytes={piece.size_bytes})' for piece in self.pieces)
         resource_repr += path_part
 
-        print(resource_repr)
         info_hash = hashlib.sha256(resource_repr.encode(encoding='utf-8')).hexdigest()
         return info_hash

@@ -6,7 +6,7 @@ def test_handshake_to_bytes():
     info_hash = '99887766554433221100ffeeddccbbaa'
     handshake = Handshake(peer_id, info_hash)
     expected = (
-            b'TorrentInno' +
+            'TorrentInno'.encode() +
             bytes.fromhex(peer_id) +
             bytes.fromhex(info_hash)
     )
