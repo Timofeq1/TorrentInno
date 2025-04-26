@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="50" height="50" viewBox="0 0 50 50">
+  <!-- File background -->
+  <rect x="5" y="5" width="40" height="40" rx="3" fill="#E0E0E0" stroke="#9E9E9E" stroke-width="1"/>
+  
+  <!-- Question mark -->
+  <text x="25" y="30" font-family="Arial" font-size="20" font-weight="bold" text-anchor="middle" fill="#757575">?</text>
+  
+  <!-- Unknown label -->
+  <rect x="10" y="35" width="30" height="10" rx="2" fill="white" stroke="#9E9E9E" stroke-width="1"/>
+  <text x="25" y="43" font-family="Arial" font-size="7" text-anchor="middle" fill="#424242">UNKNOWN</text>
+</svg>

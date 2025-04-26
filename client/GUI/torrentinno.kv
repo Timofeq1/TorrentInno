@@ -1,0 +1,146 @@
+#:kivy 2.0.0
+#:import get_color_from_hex kivy.utils.get_color_from_hex
+
+<TorrentFileItem@MDBoxLayout>:
+    orientation: 'vertical'
+    size_hint_y: None
+    height: dp(100)
+    padding: dp(5)
+    spacing: dp(2)
+    file_name: ''
+    file_size: ''
+    file_type: ''
+    download_speed: ''
+    upload_speed: ''
+    blocks: []
+    
+    canvas.before:
+        Color:
+            rgba: 0.95, 0.95, 0.95, 1
+        Rectangle:
+            pos: self.pos
+            size: self.size
+        Color:
+            rgba: 0.9, 0.9, 0.9, 1
+        Line:
+            points: [self.x, self.y, self.x + self.width, self.y]
+            width: 1
+    
+    MDBoxLayout:
+        orientation: 'horizontal'
+        size_hint_y: None
+        height: dp(70)
+        spacing: dp(10)
+        padding: dp(5)
+        
+        # File icon
+        MDBoxLayout:
+            size_hint_x: None
+            width: dp(60)
+            
+            Image:
+                source: 'data/file_icons/' + root.file_type + '.png' if root.file_type else 'data/file_icons/unknown.png'
+                size_hint: None, None
+                size: dp(50), dp(50)
+                pos_hint: {'center_x': 0.5, 'center_y': 0.5}
+            
+            #MDLabel:
+            #    text: root.file_type
+            #    halign: 'center'
+            #    font_size: dp(14)
+            #    size_hint_y: None
+            #    height: dp(20)
+            #    pos_hint: {'center_x': 0.5, 'bottom': 0}
+        
+        # File info
+        MDBoxLayout:
+            orientation: 'vertical'
+            spacing: dp(5)
+            
+            MDBoxLayout:
+                orientation: 'horizontal'
+                
+                MDLabel:
+                    text: root.file_name
+                    font_size: dp(18)
+                    halign: 'left'
+                    size_hint_x: 0.6
+                
+                MDLabel:
+                    text: root.download_speed
+                    font_size: dp(16)
+                    halign: 'right'
+                    color: get_color_from_hex('#4CAF50')  # Green color for download
+                    size_hint_x: 0.2
+                
+                MDLabel:
+                    text: root.upload_speed
+                    font_size: dp(16)
+                    halign: 'right'
+                    color: get_color_from_hex('#F44336')  # Red color for upload
+                    size_hint_x: 0.2
+            
+            MDLabel:
+                text: root.file_size
+                font_size: dp(16)
+                halign: 'left'
+    
+    # Progress bar with blocks
+    MDBoxLayout:
+        size_hint_y: None
+        height: dp(20)
+        padding: [dp(70), 0, dp(10), 0]
+        
+        MDBoxLayout:
+            id: progress_container
+            orientation: 'horizontal'
+            spacing: dp(1)
+            
+            # This will be filled with block widgets in Python code
+            canvas:
+                Color:
+                    rgba: 0.9, 0.9, 0.9, 1
+                Rectangle:
+                    pos: self.pos
+                    size: self.size
+            
+            # Generate progress blocks
+            Widget:
+                canvas:
+                    Color:
+                        rgba: 0, 0, 0, 1
+                    Line:
+                        rectangle: [self.x, self.y, self.width, self.height]
+                        width: 1
+
+<MainScreen>:
+    name: 'main'
+    
+    MDBoxLayout:
+        orientation: 'vertical'
+        
+        # App bar
+        MDTopAppBar:
+            title: "TorrentInno"
+            elevation: 4
+            left_action_items: [['arrow-left', lambda x: app.root.current_screen.on_back_pressed()]]
+            right_action_items: [['information', lambda x: app.root.current_screen.show_info()], ['dots-vertical', lambda x: app.root.current_screen.show_menu()]]
+        
+        # Scrollable list of torrent files
+        ScrollView:
+            do_scroll_x: False
+            
+            MDList:
+                id: file_list
+                spacing: dp(2)
+                padding: dp(5)
+        
+        # Add button (floating action button)
+        MDFloatingActionButton:
+            icon: 'plus'
+            pos_hint: {'right': 0.95, 'y': 0.01}
+            on_release: app.root.current_screen.add_torrent()
+
+ScreenManager:
+    MainScreen:
+        name: 'main'

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="50" height="50" viewBox="0 0 50 50">
+  <!-- File background -->
+  <rect x="5" y="5" width="40" height="40" rx="3" fill="#E0E0E0" stroke="#9E9E9E" stroke-width="1"/>
+  
+  <!-- File lines -->
+  <line x1="15" y1="15" x2="35" y2="15" stroke="#9E9E9E" stroke-width="2"/>
+  <line x1="15" y1="20" x2="35" y2="20" stroke="#9E9E9E" stroke-width="2"/>
+  <line x1="15" y1="25" x2="35" y2="25" stroke="#9E9E9E" stroke-width="2"/>
+  <line x1="15" y1="30" x2="35" y2="30" stroke="#9E9E9E" stroke-width="2"/>
+  <line x1="15" y1="35" x2="25" y2="35" stroke="#9E9E9E" stroke-width="2"/>
+  
+  <!-- TXT label -->
+  <rect x="10" y="35" width="30" height="10" rx="2" fill="white" stroke="#9E9E9E" stroke-width="1"/>
+  <text x="25" y="43" font-family="Arial" font-size="8" text-anchor="middle" fill="#424242">TXT</text>
+</svg>
