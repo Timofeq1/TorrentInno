@@ -25,14 +25,22 @@ class ResourceFile:
         DOWNLOADING = 1
         DOWNLOADED = 2
 
-    def __init__(self, destination: Path, resource: Resource, fresh_install=True):
+    def __init__(
+            self,
+            destination: Path,
+            resource: Resource,
+            fresh_install=True,
+            initial_state=State.DOWNLOADING
+    ):
         self.destination = destination
         self.resource = resource
         self.downloading_destination = self.get_downloading_destination()
         self.lock = asyncio.Lock()
-        self.state = ResourceFile.State.DOWNLOADING
+        self.state = initial_state
 
         if fresh_install:
+            assert initial_state == ResourceFile.State.DOWNLOADING
+
             destination.unlink(missing_ok=True)
             self.downloading_destination.unlink(missing_ok=True)
 

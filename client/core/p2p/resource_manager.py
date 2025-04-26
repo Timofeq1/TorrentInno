@@ -33,36 +33,35 @@ class ResourceManager:
         self.resource = resource
         self.has_file = has_file
 
-        self.resource_file = ResourceFile(destination, resource, fresh_install=False)
         self.info_hash = resource.get_info_hash()
 
         # If the peer can give file pieces
         self.share_file = False
 
-        # dict peer_id <-> Connection
-        self.connections: dict[str, Connection] = dict()
+        # Peer dictionaries
+        self.connections: dict[str, Connection] = dict() # peer_id <-> Connection
+        self.bitfields: dict[str, list[bool]] = dict() # peer_id <-> bitfield (owned chunks)
+        self._free_peers: set[str] = set() # set of peer ids that are not involved in any work
 
-        # dict peer_id <-> pieces (bitfield) this peer has
-        self.bitfields: dict[str, list[bool]] = dict()
+        self.piece_status: list[ResourceManager.PieceStatus] = []
+        if has_file: # The caller claims to already have the file
+            self.resource_file = ResourceFile(
+                destination,
+                resource,
+                fresh_install=False,
+                initial_state=ResourceFile.State.DOWNLOADED
+            )
+            self.piece_status = [ResourceManager.PieceStatus.SAVED] * len(self.resource.pieces)
+        else: # The caller does not the complete downloaded file
+            self.resource_file = ResourceFile(
+                destination,
+                resource,
+                fresh_install=True, # TODO: add normal restoring procedure (for now simply delete any previous files)
+                initial_state=ResourceFile.State.DOWNLOADING
+            )
+            self.piece_status = [ResourceManager.PieceStatus.FREE] * len(self.resource.pieces)
 
-        if has_file and not destination.exists():
-            raise RuntimeError("The caller does not have the file but has_file=True")
-
-        # TODO: add normal restoring procedure
-        # For now, simply delete the destination and begin from zero downloaded file
-        if not has_file:
-            destination.unlink(missing_ok=True)
-
-        # List of currently not working peers
-        self._free_peers: set[str] = set()
-
-        # Fill the initial status of the pieces
-        # If the caller passes True to the has_file, then we assume that all pieces are downloaded
-        _default_piece_status = ResourceManager.PieceStatus.SAVED if has_file else ResourceManager.PieceStatus.FREE
-        self.piece_status: list[ResourceManager.PieceStatus] = \
-            [_default_piece_status] * len(self.resource.pieces)
-
-        # Current peer that handles this piece
+        # Current peer id that handles the piece (empty string=no peer)
         self._peer_in_charge: list[str] = [''] * len(self.resource.pieces)
 
         # Various asyncio background tasks
