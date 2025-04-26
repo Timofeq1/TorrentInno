@@ -38,3 +38,6 @@ async def test_resource_file(tmp_path):
 
     # Ensure the downloading resource is moved and no longer exists
     assert not resource_file.get_downloading_destination().exists()
+
+    with pytest.raises(Exception):
+        await resource_file.save_validated_piece(2, "\x02\xa0".encode())
