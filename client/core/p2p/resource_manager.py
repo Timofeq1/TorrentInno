@@ -6,7 +6,7 @@ import random
 
 from core.common.peer_info import PeerInfo
 from core.p2p.connection import Connection, establish_connection
-from core.p2p.message import Handshake, Request, Piece, Bitfield
+from core.p2p.message import Handshake, Request, Bitfield, Piece
 from core.p2p.resource_file import ResourceFile
 from core.common.resource import Resource
 from core.p2p.connection_listener import ConnectionListener
@@ -33,55 +33,49 @@ class ResourceManager:
         self.resource = resource
         self.has_file = has_file
 
-        self.resource_file = ResourceFile(destination, resource, fresh_install=False)
         self.info_hash = resource.get_info_hash()
 
         # If the peer can give file pieces
         self.share_file = False
 
-        # dict peer_id <-> Connection
-        self.connections: dict[str, Connection] = dict()
+        # Peer dictionaries
+        self._connections: dict[str, Connection] = dict()  # peer_id <-> Connection
+        self._bitfields: dict[str, list[bool]] = dict()  # peer_id <-> bitfield (owned chunks)
+        self._free_peers: set[str] = set()  # set of peer ids that are not involved in any work
 
-        # dict peer_id <-> pieces (bitfield) this peer has
-        self.bitfields: dict[str, list[bool]] = dict()
+        self.piece_status: list[ResourceManager.PieceStatus] = []
+        if has_file:  # The caller claims to already have the file
+            self.resource_file = ResourceFile(
+                destination,
+                resource,
+                fresh_install=False,
+                initial_state=ResourceFile.State.DOWNLOADED
+            )
+            self.piece_status = [ResourceManager.PieceStatus.SAVED] * len(self.resource.pieces)
+        else:  # The caller does not the complete downloaded file
+            self.resource_file = ResourceFile(
+                destination,
+                resource,
+                fresh_install=True,  # TODO: add normal restoring procedure (for now simply delete any previous files)
+                initial_state=ResourceFile.State.DOWNLOADING
+            )
+            self.piece_status = [ResourceManager.PieceStatus.FREE] * len(self.resource.pieces)
 
-        if has_file and not destination.exists():
-            raise RuntimeError("The caller does not have the file but has_file=True")
-
-        # TODO: add normal restoring procedure
-        # For now, simply delete the destination and begin from zero downloaded file
-        if not has_file:
-            destination.unlink(missing_ok=True)
-
-        # List of currently not working peers
-        self._free_peers: set[str] = set()
-
-        # Fill the initial status of the pieces
-        # If the caller passes True to the has_file, then we assume that all pieces are downloaded
-        _default_piece_status = ResourceManager.PieceStatus.SAVED if has_file else ResourceManager.PieceStatus.FREE
-        self.piece_status: list[ResourceManager.PieceStatus] = \
-            [_default_piece_status] * len(self.resource.pieces)
-
-        # Current peer that handles this piece
+        # Current peer id that handles the piece (empty string=no peer)
         self._peer_in_charge: list[str] = [''] * len(self.resource.pieces)
 
         # Various asyncio background tasks
         self._download_task: asyncio.Task | None = None
         self._server_task: asyncio.Task | None = None
+        self._broadcast_task: asyncio.Task | None = None
 
-    def _log(self, msg: str):
+    def _log_prefix(self, msg: str) -> str:
         return f"[ResourceManager peer_id={self.host_peer_id[:6]} info_hash={self.info_hash[:6]}] {msg}"
-
-    async def _send_bitfield(self, connection: Connection):
-        stored_pieces = list(
-            piece_status == ResourceManager.PieceStatus.SAVED for piece_status in self.piece_status
-        )
-        await connection.send_message(Bitfield(stored_pieces))
 
     # Some new peer wants to connect to this peer
     async def _handle_incoming_connection(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         host, port = writer.get_extra_info('peername')
-        logging.info(self._log(f"{host}:{port} is trying to connect"))
+        logging.info(self._log_prefix(f"{host}:{port} is trying to connect"))
         try:
             response = await reader.readexactly(75)
             assert response[0:11].decode() == 'TorrentInno'
@@ -94,7 +88,7 @@ class ResourceManager:
                 raise RuntimeError(f"Peer {peer_id} has greater id and is trying to establish connection")
 
             # If we already have connection with this peer id -> abort the incoming connection
-            if peer_id in self.connections:
+            if peer_id in self._connections:
                 return
 
             # If everything is correct, then send the response handshake message
@@ -105,100 +99,14 @@ class ResourceManager:
             connection = Connection(reader, writer, self.resource)
             await self._add_peer(peer_id, connection)
 
-            logging.info(self._log(f"Establish connection with {peer_id[:6]}"))
+            logging.info(self._log_prefix(f"Establish connection with {peer_id[:6]}"))
         except Exception as e:
-            logging.exception(self._log(f"Failed to handle incoming connection with {host}"))
+            logging.exception(self._log_prefix(f"Failed to handle incoming connection with {host}"))
             writer.close()
             await writer.wait_closed()
 
     def _create_connection_listener(self, peer_id: str) -> ConnectionListener:
-        class Listener(ConnectionListener):
-            def __init__(self, resource_manager: 'ResourceManager'):
-                self.resource_manager = resource_manager
-
-            async def on_request(self, request: Request):
-                if not self.resource_manager.share_file:
-                    logging.info(self.resource_manager._log(f"Ignore Request message from peer {peer_id[:6]}"))
-                    return
-
-                try:
-                    data = await self.resource_manager.resource_file.get_block(
-                        request.piece_index,
-                        request.piece_inner_offset,
-                        request.block_length
-                    )
-                    connection = self.resource_manager.connections[peer_id]
-                    await connection.send_message(
-                        Piece(
-                            request.piece_index,
-                            request.piece_inner_offset,
-                            request.block_length,
-                            data
-                        )
-                    )
-                    logging.info(self.resource_manager._log(
-                        f"Send piece {request.piece_index} on Request message to peer {peer_id[:6]}"))
-                except Exception:
-                    logging.exception(self.resource_manager._log(f"Exception on request message from peer {peer_id[:6]}"))
-                    pass
-
-            async def on_piece(self, piece: Piece):
-                # This peer is not in charge on this piece
-                if self.resource_manager._peer_in_charge[piece.piece_index] != peer_id:
-                    logging.info(
-                        self.resource_manager._log(
-                            f"Discard piece {piece.piece_index} from {peer_id[:6]} as not in charge"
-                        )
-                    )
-                    return
-
-                self.resource_manager.piece_status[piece.piece_index] = ResourceManager.PieceStatus.RECEIVED
-                try:
-                    # Check that the received piece matches the hash
-                    assert (
-                            hashlib.sha256(piece.data).hexdigest() ==
-                            self.resource_manager.resource.pieces[piece.piece_index].sha256
-                    )
-
-                    await self.resource_manager.resource_file.save_block(
-                        piece.piece_index,
-                        piece.piece_inner_offset,
-                        piece.data
-                    )
-
-                    # If the piece is saved, then broadcast the bitfield to all connections and change the status
-                    self.resource_manager.piece_status[piece.piece_index] = ResourceManager.PieceStatus.SAVED
-
-                    saved_pieces = sum(
-                        piece_status == ResourceManager.PieceStatus.SAVED
-                        for piece_status in self.resource_manager.piece_status
-                    )
-                    logging.info(self.resource_manager._log(f"Save piece {piece.piece_index} from {peer_id[:6]}"))
-
-                    if saved_pieces == len(self.resource_manager.resource.pieces):
-                        # The file is successfully downloaded!
-                        await self.resource_manager._confirm_download_complete()
-
-                    await asyncio.gather(
-                        *(self.resource_manager._send_bitfield(connection)
-                          for connection in self.resource_manager.connections.values()),
-                        return_exceptions=True
-                    )
-                except Exception:
-                    logging.exception(self.resource_manager._log(f"Exception on piece message from peer {peer_id[:6]}"))
-                    self.resource_manager.piece_status[piece.piece_index] = ResourceManager.PieceStatus.FREE
-                    pass
-
-            async def on_bitfield(self, bitfield: Bitfield):
-                self.resource_manager.bitfields[peer_id] = bitfield.bitfield
-                logging.info(self.resource_manager._log(f"Bitfield from {peer_id[:6]}: {bitfield.bitfield}"))
-
-            async def on_close(self, cause):
-                # The connection with peer for some reason is closed
-                logging.info(self.resource_manager._log(f"The connection with {peer_id[:6]} is closed"))
-                await self.resource_manager._remove_peer(peer_id)
-
-        return Listener(self)
+        return ConnectionListenerImpl(peer_id, self)
 
     async def _confirm_download_complete(self):
         saved_pieces = sum(
@@ -209,33 +117,33 @@ class ResourceManager:
 
         await self.resource_file.accept_download()
         await self.stop_download()
-        logging.info(self._log("Download is completed"))
+        logging.info(self._log_prefix("Download is completed"))
 
     async def _add_peer(self, peer_id: str, connection: Connection):
-        self.connections[peer_id] = connection
-        self.bitfields[peer_id] = [False] * len(self.resource.pieces)
+        self._connections[peer_id] = connection
+        self._bitfields[peer_id] = [False] * len(self.resource.pieces)
         self._free_peers.add(peer_id)
 
         connection.add_listener(self._create_connection_listener(peer_id))
         await connection.listen()
         # Send the message about the stored pieces
-        await self._send_bitfield(connection)
+        await self._send_bitfield(peer_id)
 
     async def _remove_peer(self, peer_id: str):
         try:
-            await self.connections[peer_id].close()
+            await self._connections[peer_id].close()
         except Exception as e:
             # Ignore any exception with closing (probably peer_id either is not in list or connection is already closed
             pass
-        self.connections.pop(peer_id, None)
-        self.bitfields.pop(peer_id, None)
+        self._connections.pop(peer_id, None)
+        self._bitfields.pop(peer_id, None)
         self._free_peers.discard(peer_id)
 
     # -----MAIN DOWNLOAD LOGIC BEGINS HERE-----
 
     async def _download_work(self, peer_id: str, piece_index: int):
-        logging.info(self._log(f"Download Work on piece {piece_index} from peer {peer_id[:6]}"))
-        connection = self.connections[peer_id]
+        logging.info(self._log_prefix(f"Download Work on piece {piece_index} from peer {peer_id[:6]}"))
+        connection = self._connections[peer_id]
         await connection.send_message(
             Request(
                 piece_index,
@@ -251,7 +159,7 @@ class ResourceManager:
             self.piece_status[piece_index] = ResourceManager.PieceStatus.FREE
 
     async def _download_loop(self):
-        logging.info(self._log("Start download loop"))
+        logging.info(self._log_prefix("Start download loop"))
         works = set()
         while True:
             # Find free pieces
@@ -285,14 +193,41 @@ class ResourceManager:
     # -----END OF DOWNLOAD LOGIC-----
 
     def _peer_has_piece(self, peer_id: str, piece_index: int) -> bool:
-        return self.bitfields[peer_id][piece_index] == True
+        return self._bitfields[peer_id][piece_index] == True
 
-    async def _run_server_task(self, server: asyncio.Server):
+    def _get_bitfield(self) -> list[bool]:
+        return list(
+            piece_status == ResourceManager.PieceStatus.SAVED for piece_status in self.piece_status
+        )
+
+    async def _send_bitfield(self, peer_id: str):
+        connection = self._connections[peer_id]
+        bitfield = Bitfield(self._get_bitfield())
+        await connection.send_message(bitfield)
+
+    async def _send_bitfield_to_all_peers(self):
+        bitfield = Bitfield(self._get_bitfield())
+        await asyncio.gather(
+            *(connection.send_message(bitfield)
+              for connection in self._connections.values()),
+            return_exceptions=True
+        )
+
+    # Periodic broadcast with bitfield to compensate possible exceptions in the Piece message
+    async def _periodic_broadcast(self):
+        while True:
+            await self._send_bitfield_to_all_peers()
+            await asyncio.sleep(30)  # Sleep for 30 seconds
+
+    async def _serve_forever(self, server: asyncio.Server):
         async with server:
             await server.serve_forever()
 
     # PUBLIC METHODS:
     async def open_public_port(self) -> int:
+        if self._server_task is not None:
+            raise RuntimeError("Peer is already accepting connections")
+
         # Start accepting peer connections on some random port
         public_server = await asyncio.start_server(
             self._handle_incoming_connection,
@@ -300,7 +235,12 @@ class ResourceManager:
             port=0
         )
         host, port = public_server.sockets[0].getsockname()
-        self._server_task = asyncio.create_task(self._run_server_task(public_server))
+        self._server_task = asyncio.create_task(self._serve_forever(public_server))
+
+        # Also run the bitfield broadcast task
+        if self._broadcast_task is None:
+            self._broadcast_task = asyncio.create_task(self._periodic_broadcast())
+
         # Return port on which connection has been opened
         return port
 
@@ -308,6 +248,11 @@ class ResourceManager:
         # Close the server_task connection
         if self._server_task is not None:
             self._server_task.cancel()
+            self._server_task = None
+
+        if self._broadcast_task is not None:
+            self._broadcast_task.cancel()
+            self._broadcast_task = None
 
     async def start_download(self):
         # Start downloading the resource
@@ -318,7 +263,7 @@ class ResourceManager:
             self._download_task = asyncio.create_task(self._download_loop())
 
     async def stop_download(self):
-        logging.info(self._log("Stop download"))
+        logging.info(self._log_prefix("Stop download"))
 
         # Stop downloading the resource
         self._download_task.cancel()
@@ -327,21 +272,122 @@ class ResourceManager:
     async def submit_peers(self, peers: list[PeerInfo]):
         for peer in peers:
             if peer.peer_id == self.host_peer_id:
-                logging.warning(self._log("host_peer_id is passed in submit_peers"))
+                logging.warning(self._log_prefix("host_peer_id is passed in submit_peers"))
                 continue
 
             # IMPORTANT RULE: The initiator of connection is always peer with the smaller id
             if self.host_peer_id < peer.peer_id:
                 try:
-                    if peer.peer_id not in self.connections:  # We do not want repeating connections
+                    if peer.peer_id not in self._connections:  # We do not want repeating connections
                         connection = await establish_connection(self.host_peer_id, peer, self.resource)
                         await self._add_peer(peer.peer_id, connection)
-                        logging.info(self._log(f"Establish connection with {peer.peer_id[:6]}"))
+                        logging.info(self._log_prefix(f"Establish connection with {peer.peer_id[:6]}"))
                 except Exception:
-                    logging.exception(self._log(f"Exception while establishing connection with {peer.peer_id[:6]}"))
+                    logging.exception(
+                        self._log_prefix(f"Exception while establishing connection with {peer.peer_id[:6]}"))
 
     async def start_sharing_file(self):
         self.share_file = True
 
     async def stop_sharing_file(self):
         self.share_file = False
+
+
+class ConnectionListenerImpl(ConnectionListener):
+    def __init__(self, connected_peer_id: str, resource_manager: ResourceManager):
+        self.resource_manager = resource_manager
+        self.connected_peer_id = connected_peer_id
+
+    def _info_log(self, msg: str):
+        logging.info(
+            self.resource_manager._log_prefix(msg)
+        )
+
+    async def on_request(self, request: Request):
+        if not self.resource_manager.share_file:
+            self._info_log(f"Ignore Request message from peer {self.connected_peer_id[:6]} as sharing is disabled")
+            return
+
+        try:
+            data = await self.resource_manager.resource_file.get_block(
+                request.piece_index,
+                request.piece_inner_offset,
+                request.block_length
+            )
+            connection = self.resource_manager._connections[self.connected_peer_id]
+            await connection.send_message(
+                Piece(
+                    request.piece_index,
+                    request.piece_inner_offset,
+                    request.block_length,
+                    data
+                )
+            )
+            self._info_log(f"Send piece {request.piece_index} on Request message to peer {self.connected_peer_id[:6]}")
+        except Exception:
+            logging.exception(
+                self.resource_manager._log_prefix(
+                    f"Exception on request message from peer {self.connected_peer_id[:6]}"
+                )
+            )
+            pass
+
+    async def on_piece(self, piece: Piece):
+        # This peer is not in charge on this piece
+        if self.resource_manager._peer_in_charge[piece.piece_index] != self.connected_peer_id:
+            self._info_log(f"Discard piece {piece.piece_index} from {self.connected_peer_id[:6]} as not in charge")
+            return
+
+        self.resource_manager.piece_status[piece.piece_index] = ResourceManager.PieceStatus.RECEIVED
+        try:
+            # Check that the received piece matches the hash
+            expected_hash = hashlib.sha256(piece.data).hexdigest()
+            received_hash = self.resource_manager.resource.pieces[piece.piece_index].sha256
+
+            if expected_hash != received_hash:
+                logging.warning(
+                    self.resource_manager._log_prefix(
+                        f"Incorrect hash of piece {piece.piece_index} on Piece message from peer {self.connected_peer_id}\n" +
+                        f"Expected: {expected_hash}\n"
+                        f"Received: {received_hash}"
+                    )
+                )
+                return
+
+            await self.resource_manager.resource_file.save_block(
+                piece.piece_index,
+                piece.piece_inner_offset,
+                piece.data
+            )
+
+            # If the piece is saved, then broadcast the bitfield to all connections and change the status
+            self.resource_manager.piece_status[piece.piece_index] = ResourceManager.PieceStatus.SAVED
+
+            saved_pieces = sum(
+                piece_status == ResourceManager.PieceStatus.SAVED
+                for piece_status in self.resource_manager.piece_status
+            )
+            self._info_log(f"Save piece {piece.piece_index} from {self.connected_peer_id[:6]}")
+
+            if saved_pieces == len(self.resource_manager.resource.pieces):
+                # The file is successfully downloaded!
+                await self.resource_manager._confirm_download_complete()
+
+            await self.resource_manager._send_bitfield_to_all_peers()
+        except Exception:
+            logging.exception(
+                self.resource_manager._log_prefix(
+                    f"Exception on piece message from peer {self.connected_peer_id[:6]}"
+                )
+            )
+            self.resource_manager.piece_status[piece.piece_index] = ResourceManager.PieceStatus.FREE
+            pass
+
+    async def on_bitfield(self, bitfield: Bitfield):
+        self.resource_manager._bitfields[self.connected_peer_id] = bitfield.bitfield
+        self._info_log(f"Bitfield from {self.connected_peer_id[:6]}: {bitfield.bitfield}")
+
+    async def on_close(self, cause):
+        # The connection with peer for some reason is closed
+        self._info_log(f"The connection with {self.connected_peer_id[:6]} is closed")
+        await self.resource_manager._remove_peer(self.connected_peer_id)

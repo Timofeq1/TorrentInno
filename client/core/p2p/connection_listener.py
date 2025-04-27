@@ -1,4 +1,4 @@
-from core.p2p.message import Message, Request, Piece, Bitfield
+from core.p2p.message import Request, Piece, Bitfield
 
 
 class ConnectionListener:

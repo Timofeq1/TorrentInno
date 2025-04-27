@@ -6,6 +6,7 @@ import aiofiles
 import aiofiles.os
 
 from core.common.resource import Resource
+from enum import Enum
 
 
 class ResourceFile:
@@ -14,21 +15,32 @@ class ResourceFile:
     the complexities of managing the "hidden file" and the aiofiles-related operations. Everything else
     (checking and validating pieces, for example) is the caller's responsibility.
 
-    There basically two operating modes:
-    1) The destination file exists. Then this file will be used in all read operations. The write operations
-    will raise RuntimeException.
-    2) The destination file does not exist. Then the auxiliary downloading_destination file will be used.
-    This file is created with the size of the initial destination file. When the client decides that all pieces
-    are written, then it calls the accept_download and the file gets renamed to the original destination name.
+    The class has two states
+    1) Downloading state. In this state the temporary file is created and uses to write/read operations
+    2) Downloaded state. In this state the destination itself is used to read operations. Write operations
+    raise exception.
     """
 
-    def __init__(self, destination: Path, resource: Resource, fresh_install=True):
+    class State(Enum):
+        DOWNLOADING = 1
+        DOWNLOADED = 2
+
+    def __init__(
+            self,
+            destination: Path,
+            resource: Resource,
+            fresh_install=True,
+            initial_state=State.DOWNLOADING
+    ):
         self.destination = destination
         self.resource = resource
         self.downloading_destination = self.get_downloading_destination()
         self.lock = asyncio.Lock()
+        self.state = initial_state
 
         if fresh_install:
+            assert initial_state == ResourceFile.State.DOWNLOADING
+
             destination.unlink(missing_ok=True)
             self.downloading_destination.unlink(missing_ok=True)
 
@@ -59,7 +71,7 @@ class ResourceFile:
             raise RuntimeError("The requested read portion does not fit the file")
 
         take_from: Path
-        if self.destination.exists():
+        if self.state == ResourceFile.State.DOWNLOADED:
             take_from = self.destination
         else:
             await self._ensure_downloading_destination()
@@ -70,12 +82,12 @@ class ResourceFile:
             return await f.read(block_length)
 
     async def save_block(self, piece_index: int, piece_inner_offset: int, data: bytes):
+        if self.state == ResourceFile.State.DOWNLOADED:
+            raise RuntimeError("Cannot perform write operation in DOWNLOADED state")
+
         offset = self._calculate_offset(piece_index, piece_inner_offset)
         if offset + len(data) > self.offsets[-1]:
             raise RuntimeError("The write portion overflows the file")
-
-        if self.destination.exists():
-            raise RuntimeError("File is already downloaded")
 
         await self._ensure_downloading_destination()
 
@@ -88,3 +100,4 @@ class ResourceFile:
 
     async def accept_download(self):
         await aiofiles.os.rename(self.downloading_destination, self.destination)
+        self.state = ResourceFile.State.DOWNLOADED
