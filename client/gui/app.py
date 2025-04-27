@@ -5,84 +5,7 @@ from kivy.uix.screenmanager import ScreenManager, Screen
 from kivy.properties import ListProperty, StringProperty, NumericProperty
 from kivy.metrics import dp
 from kivymd.uix.boxlayout import MDBoxLayout
-import random
-
-# Mock data for torrent files
-MOCK_FILES = [
-    {
-        'name': 'example.txt',
-        'size': '1.23 kb',
-        'type': 'txt',
-        'download_speed': '1kb/s',
-        'upload_speed': '0kb/s',
-        'blocks': [0] * 20  # 0 means not downloaded, 1 means downloaded
-    },
-    {
-        'name': 'music.mp3',
-        'size': '2.03 mb',
-        'type': 'mp3',
-        'download_speed': '2mb/s',
-        'upload_speed': '1mb/s',
-        'blocks': [0] * 20
-    },
-    {
-        'name': 'video.mp4',
-        'size': '12.7 mb',
-        'type': 'mp4',
-        'download_speed': '1mb/s',
-        'upload_speed': '1mb/s',
-        'blocks': [0] * 20
-    },
-    {
-        'name': 'unknown',
-        'size': '1.097 Gb',
-        'type': 'unknown',
-        'download_speed': '3mb/s',
-        'upload_speed': '2 mb/s',
-        'blocks': [0] * 20
-    }
-]
-
-# Mock function to update download progress
-def update_download_progress(files):
-    """Simulate download progress by randomly updating blocks"""
-    for file in files:
-        # Randomly select a block to mark as downloaded
-        if 0 in file['blocks']:  # If there are still blocks to download
-            zero_indices = [i for i, x in enumerate(file['blocks']) if x == 0]
-            if zero_indices:  # If there are blocks that are not downloaded yet
-                # Randomly select 1-3 blocks to mark as downloaded
-                num_blocks = min(random.randint(1, 3), len(zero_indices))
-                for _ in range(num_blocks):
-                    if zero_indices:  # Check again in case we've used all indices
-                        idx = random.choice(zero_indices)
-                        file['blocks'][idx] = 1
-                        zero_indices.remove(idx)
-        
-        # Update download and upload speeds randomly
-        download_value = float(file['download_speed'].split('mb/s')[0].split('kb/s')[0].strip())
-        upload_value = float(file['upload_speed'].split('mb/s')[0].split('kb/s')[0].strip())
-        
-        # Randomly adjust speeds
-        download_value += random.uniform(-0.5, 0.5)
-        upload_value += random.uniform(-0.3, 0.3)
-        
-        # Ensure speeds don't go below 0.1
-        download_value = max(0.1, download_value)
-        upload_value = max(0.1, upload_value)
-        
-        # Update the speed values
-        if 'kb/s' in file['download_speed']:
-            file['download_speed'] = f"{download_value:.1f}kb/s"
-        else:
-            file['download_speed'] = f"{download_value:.1f}mb/s"
-            
-        if 'kb/s' in file['upload_speed']:
-            file['upload_speed'] = f"{upload_value:.1f}kb/s"
-        else:
-            file['upload_speed'] = f"{upload_value:.1f}mb/s"
-    
-    return files
+import torrent_manager
 
 class TorrentFileItem(MDBoxLayout):
     """Class representing a single torrent file in the list"""
@@ -175,10 +98,10 @@ class MainScreen(Screen):
     
     def __init__(self, **kwargs):
         super(MainScreen, self).__init__(**kwargs)
-        # Create a deep copy of MOCK_FILES to avoid modifying the original
-        self.files = []
-        for file in MOCK_FILES:
-            self.files.append(file.copy())
+        # Инициализируем менеджер торрентов
+        torrent_manager.initialize()
+        # Получаем список файлов из менеджера торрентов
+        self.files = torrent_manager.get_files()
         # Start the clock to update download progress every second
         Clock.schedule_interval(self.update_progress, 1)
     
@@ -188,7 +111,7 @@ class MainScreen(Screen):
     
     def update_progress(self, dt):
         """Update the download progress of files"""
-        self.files = update_download_progress(self.files)
+        self.files = torrent_manager.update_files()
         self.update_file_list()
     
     def update_file_list(self):
@@ -310,6 +233,8 @@ class MainScreen(Screen):
         self.file_manager.close()
         # Check if the file is a torrent file
         if path.endswith('.torrent'):
+            # Сохраняем путь к файлу для использования в start_download
+            self.current_torrent_url = path
             self.show_torrent_content_dialog(path)
         else:
             from kivymd.toast import toast
@@ -320,6 +245,8 @@ class MainScreen(Screen):
         url = self.url_field.text.strip()
         if url.startswith('magnet:') or url.endswith('.torrent'):
             self.add_dialog.dismiss()
+            # Сохраняем URL для использования в start_download
+            self.current_torrent_url = url
             self.show_torrent_content_dialog(url)
         else:
             from kivymd.toast import toast
@@ -327,12 +254,8 @@ class MainScreen(Screen):
     
     def show_torrent_content_dialog(self, source):
         """Show dialog with torrent content for selection"""
-        # Mock data for torrent content
-        mock_content = [
-            {"name": "file1.mp4", "size": "1.2 GB", "selected": True},
-            {"name": "file2.txt", "size": "15 KB", "selected": True},
-            {"name": "file3.mp3", "size": "5.7 MB", "selected": True}
-        ]
+        # Получаем данные о содержимом торрента из менеджера
+        mock_content = torrent_manager.get_mock_content(source)
         
         from kivymd.uix.list import MDList, OneLineAvatarIconListItem, IconLeftWidget, IconRightWidget
         from kivymd.uix.selectioncontrol import MDCheckbox
@@ -429,29 +352,27 @@ class MainScreen(Screen):
     
     def start_download(self, *args):
         """Start downloading selected files"""
-        # Here you would start the actual download process
-        # For now, we'll just close the dialog and add a mock file to the list
+        # Закрываем диалог
         self.content_dialog.dismiss()
         
-        # Add a new mock file to the list
-        new_file = {
-            'name': 'new_download.mp4',
-            'size': '45.8 mb',
-            'type': 'mp4',
-            'download_speed': '0mb/s',
-            'upload_speed': '0mb/s',
-            'blocks': [0] * 20
-        }
-        
-        self.files.append(new_file)
-        self.update_file_list()
+        # Получаем информацию о торренте из менеджера
+        url = getattr(self, 'current_torrent_url', '')
+        if url:
+            file_info = torrent_manager.get_file_info(url)
+            # Обновляем список файлов
+            self.files = torrent_manager.get_files()
+            self.update_file_list()
 
     def remove_torrent(self, index=None):
         """Remove a torrent"""
         if index is not None and 0 <= index < len(self.files):
-            # Remove the file at the specified index
-            del self.files[index]
-            # Update the file list to reflect the changes
+            # Получаем имя файла для удаления
+            file_name = self.files[index]['name']
+            # Удаляем торрент через менеджер
+            torrent_manager.remove_torrent(file_name)
+            # Обновляем локальный список файлов
+            self.files = torrent_manager.get_files()
+            # Обновляем отображение
             self.update_file_list()
 
 class TorrentInnoApp(MDApp):
@@ -461,6 +382,11 @@ class TorrentInnoApp(MDApp):
         self.theme_cls.theme_style = "Light"
         
         return super().build()
+    
+    def on_stop(self):
+        """Вызывается при закрытии приложения"""
+        # Сохраняем состояние торрентов
+        torrent_manager.shutdown()
 
         """ [DEPRECATED] 
         This part of code cause doublicationg of blocks

@@ -11,12 +11,21 @@ from core.common.peer_info import PeerInfo
 from core.common.resource import Resource
 
 def generate_random_bits(size) -> bytes:
+    '''
+    Generate random bits usign randint 
+    '''
     return bytes(random.randint(0, 255) for _ in range(size))
 
 def generate_random_peer_id() -> str:
+    '''
+    function what generate peerid
+    '''
     return generate_random_bits(32).hex()
 
 def get_peer_public_ip():
+    '''
+    using request return public ip of the peer
+    '''
     try:
         response = requests.get("https://api.ipify.org?format=json", timeout=5)
         return response.json()['ip']
@@ -24,6 +33,9 @@ def get_peer_public_ip():
         return None
 
 async def share_file(path, resource: Resource): #name can be changed
+    '''
+    Function to start sharing files
+    '''
     peer_id = generate_random_peer_id()
     file_path = path
     resource_manager_instance = resource_manager.ResourceManager(peer_id, file_path, resource, has_file=True)
@@ -41,7 +53,7 @@ async def share_file(path, resource: Resource): #name can be changed
 
     server_url = f"http://{resource.tracker_ip}:{resource.tracker_port}/peers"
 
-    while True:
+    while resource_manager_instance.share_file: # ? how to stop sharing of the file 
         peer_list_str = await update_peer(server_url,peer_json)
         peer_list = json.loads(peer_list_str)
         await resource_manager_instance.submit_peers(peer_list)
