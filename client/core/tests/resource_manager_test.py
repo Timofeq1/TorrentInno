@@ -95,8 +95,6 @@ async def main():
 
     # ...watch the peers talking!
 
-    # Clean everything
-
 if __name__ == "__main__":
     try:
         loop = asyncio.new_event_loop()
