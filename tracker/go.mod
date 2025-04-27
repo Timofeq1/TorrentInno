@@ -1,4 +1,4 @@
-module peers-tracker
+module tracker
 
 go 1.23.0
 
