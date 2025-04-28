@@ -132,6 +132,7 @@ async def start_share_file(destination, resource: Resource):
 
 async def stop_share_file(destination):
     await resource_manager_dict.get(destination).stop_sharing_file()
+    del resource_manager_dict[destination]
 
 async def start_download_file(destination, resource: Resource):
     '''
@@ -158,6 +159,7 @@ async def stop_download_file(destination):
     on tracker server
     '''
     await resource_manager_dict.get(destination).stop_download()
+    del resource_manager_dict[destination]
 
 
 async def get_state(destination):
