@@ -10,9 +10,11 @@ from core.s2p.server_manager import update_peer
 from core.common.peer_info import PeerInfo
 from core.common.resource import Resource
 
+# --- utility functions ---
+
 def generate_random_bits(size) -> bytes:
     '''
-    Generate random bits usign randint 
+    Generate random bits usign randint
     '''
     return bytes(random.randint(0, 255) for _ in range(size))
 
@@ -32,7 +34,9 @@ def get_peer_public_ip():
     except Exception as e:
         return None
 
-async def share_file(path, resource: Resource): #name can be changed
+# --- Torrent logic ---
+
+async def share_file(path, resource: Resource):
     '''
     Function to start sharing files
     '''
@@ -41,7 +45,7 @@ async def share_file(path, resource: Resource): #name can be changed
     resource_manager_instance = resource_manager.ResourceManager(peer_id, file_path, resource, has_file=True)
     port = await resource_manager_instance.open_public_port()
     await resource_manager_instance.start_sharing_file()
-    peer_ip =get_peer_public_ip()
+    peer_ip = get_peer_public_ip() # TODO: Edit function to get IP
     peer_info = PeerInfo(peer_ip, port, peer_id)
 
     peer_json = {
@@ -53,8 +57,36 @@ async def share_file(path, resource: Resource): #name can be changed
 
     server_url = f"http://{resource.tracker_ip}:{resource.tracker_port}/peers"
 
-    while resource_manager_instance.share_file: # ? how to stop sharing of the file 
+    while resource_manager_instance.share_file: # ? how to stop sharing of the file
         peer_list_str = await update_peer(server_url,peer_json)
         peer_list = json.loads(peer_list_str)
         await resource_manager_instance.submit_peers(peer_list)
         time.sleep(25)
+
+
+async def initialize():
+    ...
+
+async def shutdown():
+    ...
+
+async def get_files():
+    ...
+
+async def update_file(file_name):
+    ...
+
+async def update_files():
+    ...
+
+async def get_file_info(url):
+    ...
+
+async def add_torrent(file_info):
+    ...
+
+async def remove_torrent(file_name):
+    ...
+
+def get_mock_content(source):
+    ...

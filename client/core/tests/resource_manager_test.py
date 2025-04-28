@@ -54,7 +54,7 @@ async def main():
     # Set up source peer_id. This can be used as an example of working with ResourceManager
     source_peer_id = random_peer_id() # peer_id is unique PER PEER (not per ResourceManager)
     source_destination = source_file
-    source_resource_manager = ResourceManager(source_peer_id, source_destination, resource, has_file=True)
+    source_resource_manager = ResourceManager(source_peer_id, source_destination, resource)
     source_port = await source_resource_manager.open_public_port()
     await source_resource_manager.start_sharing_file()
     source_peer_info = PeerInfo('127.0.0.1', source_port, source_peer_id)
@@ -65,7 +65,7 @@ async def main():
         consumer_destination.parent.mkdir(parents=True)
 
     consumer_resource_managers = [
-        ResourceManager(consumer_peer_id, consumer_destination, resource, has_file=False)
+        ResourceManager(consumer_peer_id, consumer_destination, resource)
         for consumer_peer_id, consumer_destination in zip(consumer_peer_ids, consumer_destinations)
     ]
     for consumer_resource_manager in consumer_resource_managers:

@@ -53,14 +53,19 @@ class ResourceFile:
         return self.offsets[piece_index] + piece_inner_offset
 
     async def _create_downloading_destination(self):
+        self.downloading_destination.unlink(missing_ok=True)
         async with aiofiles.open(self.downloading_destination, mode='wb') as f:
             for piece in self.resource.pieces:
                 await f.write(bytes([0] * piece.size_bytes))
 
     async def _ensure_downloading_destination(self):
         async with self.lock:
-            if not self.downloading_destination.exists():
+            if (
+                    not self.downloading_destination.exists() or
+                    self.downloading_destination.stat().st_size != self.offsets[-1]
+            ):
                 await self._create_downloading_destination()
+
 
     async def get_piece(self, index: int) -> bytes:
         return await self.get_block(index, 0, self.resource.pieces[index].size_bytes)
@@ -99,5 +104,7 @@ class ResourceFile:
         await self.save_block(piece_index, 0, data)
 
     async def accept_download(self):
+        if self.destination.exists():
+            self.destination.unlink()
         await aiofiles.os.rename(self.downloading_destination, self.destination)
         self.state = ResourceFile.State.DOWNLOADED
