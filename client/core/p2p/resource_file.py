@@ -55,8 +55,8 @@ class ResourceFile:
     async def _create_downloading_destination(self):
         self.downloading_destination.unlink(missing_ok=True)
         async with aiofiles.open(self.downloading_destination, mode='wb') as f:
-            for piece in self.resource.pieces:
-                await f.write(bytes([0] * piece.size_bytes))
+            await f.seek(self.offsets[-1] - 1)
+            await f.write(b'\0')
 
     async def _ensure_downloading_destination(self):
         async with self.lock:

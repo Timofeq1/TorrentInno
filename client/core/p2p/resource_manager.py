@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import time
 from pathlib import Path
 from dataclasses import dataclass
 import random
@@ -26,6 +27,17 @@ class ResourceManager:
     @dataclass
     class State:
         piece_status: list[bool]
+        upload_speed_bytes_per_sec: int
+        download_speed_bytes_per_sec: int
+
+    @dataclass
+    class NetworkStats:
+        # The time of last stats drop (used to calculate approximate instantaneous upload/download speed)
+        last_drop_timestamp_seconds: float
+        bytes_downloaded_since_last_drop: int = 0
+        bytes_uploaded_since_last_drop: int = 0
+        prev_download_bytes_per_sec: int = 0
+        prev_upload_bytes_per_sec: int = 0
 
     def _log_prefix(self, msg: str) -> str:
         return f"[ResourceManager peer_id={self.host_peer_id[:6]} info_hash={self.info_hash[:6]}] {msg}"
@@ -66,18 +78,6 @@ class ResourceManager:
     def _create_connection_listener(self, peer_id: str) -> ConnectionListener:
         return ConnectionListenerImpl(peer_id, self)
 
-    async def _confirm_download_complete(self):
-        saved_pieces = sum(
-            piece_status == ResourceManager.PieceStatus.SAVED
-            for piece_status in self.piece_status
-        )
-        assert saved_pieces == len(self.resource.pieces)
-
-        await self.resource_file.accept_download()
-        await self.stop_download()
-        await self.resource_save.remove_save()
-        logging.info(self._log_prefix("Download is completed"))
-
     async def _add_peer(self, peer_id: str, connection: Connection):
         self._connections[peer_id] = connection
         self._bitfields[peer_id] = [False] * len(self.resource.pieces)
@@ -101,7 +101,7 @@ class ResourceManager:
     # -----MAIN DOWNLOAD LOGIC BEGINS HERE-----
 
     async def _download_work(self, peer_id: str, piece_index: int):
-        logging.info(self._log_prefix(f"Download Work on piece {piece_index} from peer {peer_id[:6]}"))
+        logging.info(self._log_prefix(f"Download Work to download piece {piece_index} from peer {peer_id[:6]}"))
         connection = self._connections[peer_id]
         await connection.send_message(
             Request(
@@ -155,6 +155,18 @@ class ResourceManager:
                     break
             await asyncio.sleep(0.2)
 
+    async def _confirm_download_complete(self):
+        saved_pieces = sum(
+            piece_status == ResourceManager.PieceStatus.SAVED
+            for piece_status in self.piece_status
+        )
+        assert saved_pieces == len(self.resource.pieces)
+
+        await self.resource_file.accept_download()
+        await self.stop_download()
+        await self.resource_save.remove_save()
+        logging.info(self._log_prefix("Download is completed"))
+
     # -----END OF DOWNLOAD LOGIC-----
 
     def _peer_has_piece(self, peer_id: str, piece_index: int) -> bool:
@@ -194,6 +206,26 @@ class ResourceManager:
         async with server:
             await server.serve_forever()
 
+    async def _calc_network_stats(self):
+        while True:
+            delta = time.time() - self._network_stats.last_drop_timestamp_seconds
+            self._network_stats.prev_download_bytes_per_sec = \
+                int(self._network_stats.bytes_downloaded_since_last_drop / delta)
+            self._network_stats.prev_upload_bytes_per_sec = \
+                int(self._network_stats.bytes_uploaded_since_last_drop / delta)
+
+            self._network_stats.last_drop_timestamp_seconds = time.time()
+            self._network_stats.bytes_downloaded_since_last_drop = 0
+            self._network_stats.bytes_uploaded_since_last_drop = 0
+
+            logging.info(
+                self._log_prefix(f"Download speed: {self._network_stats.prev_download_bytes_per_sec // 1000} kb/sec")
+            )
+            logging.info(
+                self._log_prefix(f"Upload speed: {self._network_stats.prev_upload_bytes_per_sec // 1000} kb/sec")
+            )
+            await asyncio.sleep(2)
+
     def __init__(
             self,
             host_peer_id: str,
@@ -201,7 +233,9 @@ class ResourceManager:
             resource: Resource,
     ):
         """
-        Create a new ResourceManager instance
+        Create a new ResourceManager instance.
+        IMPORTANT: For pair (destination, resource) there MUST be only one instance of (running) `ResourceManager`.
+        Otherwise, the whole behaviour is undefined.
 
         :param host_peer_id: the peer_id that will host the resource
         :param destination: The destination of the file on the filesystem. Important: if the destination exists
@@ -219,7 +253,7 @@ class ResourceManager:
         self.resource_save = ResourceSave(destination, resource)
 
         # If the peer can give file pieces
-        self.share_file = False
+        self.share_file = True
 
         # Peer dictionaries
         self._connections: dict[str, Connection] = dict()  # peer_id <-> Connection
@@ -250,10 +284,15 @@ class ResourceManager:
         # Current peer id that handles the piece (empty string=no peer)
         self._peer_in_charge: list[str] = [''] * len(self.resource.pieces)
 
+        # Download state
+        self._network_stats = ResourceManager.NetworkStats(time.time())
+
         # Various asyncio background tasks
         self._download_task: asyncio.Task | None = None
         self._server_task: asyncio.Task | None = None
         self._broadcast_task: asyncio.Task | None = None
+
+        self._calc_network_stats_task = asyncio.create_task(self._calc_network_stats())
 
     # PUBLIC METHODS:
     async def open_public_port(self) -> int:
@@ -338,6 +377,9 @@ class ResourceManager:
         """
         logging.info(self._log_prefix("Stop download"))
 
+        # For each piece, mark that nobody is responsible for it
+        self._peer_in_charge = [''] * len(self.resource.pieces)
+
         if self._download_task is not None:
             # Stop downloading the resource
             self._download_task.cancel()
@@ -356,22 +398,39 @@ class ResourceManager:
         """
         self.share_file = False
 
-    async def full_start(self) -> int:
+    async def full_start(
+            self,
+            restore_previous=True,
+            start_sharing_file=True,
+            start_download=True,
+            open_public_port=True
+    ) -> int | None:
         """
-        A convenience methods that automatically opens the public port of the resource manager,
-        starts download, attempt to restore the previous download state etc.
+        A method to start the `ResourceManager`. Clients MUST call this method in order to fully start the `ResourceManager`.
+        The method has a bunch of flags that allow clients to adjust the parameters of `ResourceManager`
+        at the beginning. Any disabled flag can be enabled later by calling the appropriate public method.
 
-        :return: the same as `open_public_port()`
+        The method is not guaranteed to be idempotent (i.e. repeating calls of `full_start()` to the
+        running ResourceManager may cause exceptions/various errors).
+
+        :return: if `open_public_port` is True then  the return value is the same as `open_public_port()` otherwise None
         """
-        await self.restore_previous()
-        await self.start_sharing_file()
-        await self.start_download()
-        listen_port = await self.open_public_port()
+        if restore_previous: await self.restore_previous()
+        if start_sharing_file: await self.start_sharing_file()
+        if start_download: await self.start_download()
+        listen_port = None
+        if open_public_port: listen_port = await self.open_public_port()
+
+        if self._calc_network_stats_task is None:
+            self._calc_network_stats_task = asyncio.create_task(self._calc_network_stats())
         return listen_port
 
     async def shutdown(self):
         """
-        A convenience method that is the opposite of `full_start()` (i.e. close everything that was started/launched)
+        A method to stop the running `ResourceManager`. The clients MUST call this method in order to fully stop the
+        running `ResourceManager` and release all associated resources.
+
+        The method is idempotent (repeating calls do not cause any errors/exception)
         """
         await self.close_public_port()
         await asyncio.gather(
@@ -380,6 +439,8 @@ class ResourceManager:
         )
         await self.stop_download()
         await self.stop_sharing_file()
+        if self._calc_network_stats_task is not None:
+            self._calc_network_stats_task.cancel()
 
     async def submit_peers(self, peers: list[PeerInfo]):
         """
@@ -409,7 +470,12 @@ class ResourceManager:
         Get the current state of the resource (i.e. downloaded pieces, upload/download speed etc.)
         :return: The current state of the resource (file)
         """
-        return ResourceManager.State(self._get_bitfield())
+        delta_sec = time.time() - self._network_stats.last_drop_timestamp_seconds
+        return ResourceManager.State(
+            self._get_bitfield(),
+            upload_speed_bytes_per_sec=self._network_stats.prev_upload_bytes_per_sec,
+            download_speed_bytes_per_sec=self._network_stats.prev_download_bytes_per_sec
+        )
 
 
 class ConnectionListenerImpl(ConnectionListener):
@@ -417,14 +483,13 @@ class ConnectionListenerImpl(ConnectionListener):
         self.resource_manager = resource_manager
         self.connected_peer_id = connected_peer_id
 
-    def _info_log(self, msg: str):
-        logging.info(
-            self.resource_manager._log_prefix(msg)
-        )
+    def _log(self, level, msg: str):
+        logging.log(level, self.resource_manager._log_prefix(msg))
 
     async def on_request(self, request: Request):
         if not self.resource_manager.share_file:
-            self._info_log(f"Ignore Request message from peer {self.connected_peer_id[:6]} as sharing is disabled")
+            self._log(logging.DEBUG,
+                      f"Ignore Request message from peer {self.connected_peer_id[:6]} as sharing is disabled")
             return
 
         try:
@@ -442,7 +507,12 @@ class ConnectionListenerImpl(ConnectionListener):
                     data
                 )
             )
-            self._info_log(f"Send piece {request.piece_index} on Request message to peer {self.connected_peer_id[:6]}")
+
+            # Update the network stats
+            self.resource_manager._network_stats.bytes_uploaded_since_last_drop += request.block_length
+
+            self._log(logging.DEBUG,
+                      f"Send piece {request.piece_index} on Request message to peer {self.connected_peer_id[:6]}")
         except Exception:
             logging.exception(
                 self.resource_manager._log_prefix(
@@ -454,7 +524,10 @@ class ConnectionListenerImpl(ConnectionListener):
     async def on_piece(self, piece: Piece):
         # This peer is not in charge on this piece
         if self.resource_manager._peer_in_charge[piece.piece_index] != self.connected_peer_id:
-            self._info_log(f"Discard piece {piece.piece_index} from {self.connected_peer_id[:6]} as not in charge")
+            self._log(
+                logging.DEBUG,
+                f"Discard piece {piece.piece_index} from {self.connected_peer_id[:6]} as not in charge"
+            )
             return
         self.resource_manager.piece_status[piece.piece_index] = ResourceManager.PieceStatus.RECEIVED
         try:
@@ -463,12 +536,11 @@ class ConnectionListenerImpl(ConnectionListener):
             received_hash = self.resource_manager.resource.pieces[piece.piece_index].sha256
 
             if expected_hash != received_hash:
-                logging.warning(
-                    self.resource_manager._log_prefix(
-                        f"Incorrect hash of piece {piece.piece_index} on Piece message from peer {self.connected_peer_id}\n" +
-                        f"Expected: {expected_hash}\n"
-                        f"Received: {received_hash}"
-                    )
+                self._log(
+                    logging.WARNING,
+                    f"Incorrect hash of piece {piece.piece_index} on Piece message from peer {self.connected_peer_id}\n" +
+                    f"Expected: {expected_hash}\n"
+                    f"Received: {received_hash}"
                 )
                 return
 
@@ -478,6 +550,9 @@ class ConnectionListenerImpl(ConnectionListener):
                 piece.data
             )
 
+            # Update the network stats
+            self.resource_manager._network_stats.bytes_downloaded_since_last_drop += len(piece.data)
+
             # If the piece is saved, then broadcast the bitfield to all connections and change the status
             self.resource_manager.piece_status[piece.piece_index] = ResourceManager.PieceStatus.SAVED
 
@@ -485,7 +560,11 @@ class ConnectionListenerImpl(ConnectionListener):
                 piece_status == ResourceManager.PieceStatus.SAVED
                 for piece_status in self.resource_manager.piece_status
             )
-            self._info_log(f"Save piece {piece.piece_index} from {self.connected_peer_id[:6]}")
+            self._log(
+                logging.INFO,
+                f"Save piece {piece.piece_index} from {self.connected_peer_id[:6]}. "
+                f"Now has {saved_pieces}/{len(self.resource_manager.resource.pieces)} pieces"
+            )
 
             # Also update the information about saved piece in the file:
             await self.resource_manager._save_loading_state()
@@ -509,9 +588,14 @@ class ConnectionListenerImpl(ConnectionListener):
 
     async def on_bitfield(self, bitfield: Bitfield):
         self.resource_manager._bitfields[self.connected_peer_id] = bitfield.bitfield
-        self._info_log(f"Bitfield from {self.connected_peer_id[:6]}: {bitfield.bitfield}")
+        owned_pieces = sum(bitfield.bitfield)
+        self._log(
+            logging.DEBUG,
+            f"Bitfield from {self.connected_peer_id[:6]}."
+            f" The peer claims to have {owned_pieces}/{len(bitfield.bitfield)} pieces"
+        )
 
     async def on_close(self, cause):
         # The connection with peer for some reason is closed
-        self._info_log(f"The connection with {self.connected_peer_id[:6]} is closed")
+        self._log(logging.INFO, f"The connection with {self.connected_peer_id[:6]} is closed")
         await self.resource_manager._remove_peer(self.connected_peer_id)
