@@ -188,9 +188,13 @@ A GUI torrent manager provides user interaction. Key functions include:
 
 > [!NOTE] TODO
 > * Screenshots of the GUI showing active downloads/uploads.
-> * Logs demonstrating successful peer connections, handshakes, and piece exchanges.
 > * Performance metrics (e.g., download/upload speed charts, time to download a specific file with varying numbers of peers).
-> * Tested [resource_manager_test.py](client/core/tests/resource_manager_test.py) 
+> * Tested [resource_manager_test.py](client/core/tests/resource_manager_test.py)
+
+
+**Logs from console**
+![logs](https://github.com/user-attachments/assets/35d14a34-116e-4676-8a1f-c653fcab5775)
+
 ## Discussion
 
 The TorrentInno project successfully implements the fundamental components of a P2P file-sharing system, including a tracker for peer discovery and a client capable of exchanging file pieces according to a defined protocol. The use of `asyncio` in the Python client allows for efficient handling of concurrent network operations (multiple peer connections, downloads, uploads). The separation into core logic ([core](client/core)) and GUI ([gui](client/gui)) follows Single Responsiblity Principle, enhancing maintainability and scalability.
