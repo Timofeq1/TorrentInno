@@ -3,10 +3,15 @@ import random
 import json
 import requests
 import time
+import socket
+import datetime
+import os
+import hashlib
+from typing import Dict
 
-from client.core.s2p.server_manager import update_peer
-from core.p2p import resource_manager
 from core.s2p.server_manager import update_peer
+from core.p2p import resource_manager
+from core.s2p.server_manager import heart_beat
 from core.common.peer_info import PeerInfo
 from core.common.resource import Resource
 
@@ -18,7 +23,7 @@ def generate_random_bits(size) -> bytes:
     '''
     return bytes(random.randint(0, 255) for _ in range(size))
 
-def generate_random_peer_id() -> str:
+def generate_peer_id() -> str:
     '''
     function what generate peerid
     '''
@@ -28,65 +33,137 @@ def get_peer_public_ip():
     '''
     using request return public ip of the peer
     '''
-    try:
-        response = requests.get("https://api.ipify.org?format=json", timeout=5)
-        return response.json()['ip']
-    except Exception as e:
-        return None
+    hostname = socket.gethostname()
+    ip = socket.gethostbyname(hostname)
+    return ip
 
-# --- Torrent logic ---
+TRACKER_IP = '80.71.232.39'
+TRACKER_PORT = '8080'
+peer_id = generate_peer_id()
+resource_manager_dict: Dict[str, Resource] = {}
 
-async def share_file(path, resource: Resource):
+def create_resource_json(name: str, comment: str, file_path, piece_size: int = 1024 * 1024):
     '''
-    Function to start sharing files
+    Create a resource by splitting the file into multiple pieces.
     '''
-    peer_id = generate_random_peer_id()
-    file_path = path
-    resource_manager_instance = resource_manager.ResourceManager(peer_id, file_path, resource, has_file=True)
-    port = await resource_manager_instance.open_public_port()
-    await resource_manager_instance.start_sharing_file()
-    peer_ip = get_peer_public_ip() # TODO: Edit function to get IP
-    peer_info = PeerInfo(peer_ip, port, peer_id)
+    size_bytes = os.path.getsize(file_path)
+    pieces = []
 
-    peer_json = {
-        "peerId": peer_info.peer_id,
-        "infoHash": resource.get_info_hash(),
-        "publicIp": peer_info.public_ip,
-        "publicPort": peer_info.public_port,
+    with open(file_path, 'rb') as f:
+        while True:
+            file_bytes = f.read(piece_size)
+            if not file_bytes:
+                break
+            sha256 = hashlib.sha256(file_bytes).hexdigest()
+            pieces.append({
+                'sha256': sha256,
+                'size_bytes': len(file_bytes)
+            })
+
+    resource_json = {
+        'tracker_ip': TRACKER_IP,
+        'tracker_port': TRACKER_PORT,
+        'comment': comment,
+        'creation_date': datetime.datetime.now().isoformat(),
+        'name': name,
+        'pieces': pieces
     }
 
-    server_url = f"http://{resource.tracker_ip}:{resource.tracker_port}/peers"
-
-    while resource_manager_instance.share_file: # ? how to stop sharing of the file
-        peer_list_str = await update_peer(server_url,peer_json)
-        peer_list = json.loads(peer_list_str)
-        await resource_manager_instance.submit_peers(peer_list)
-        time.sleep(25)
+    return resource_json
 
 
-async def initialize():
-    ...
+def create_resource_from_json(resource_json):
+    '''
+    Create a resource from the given JSON data.
+    '''
+    pieces = [Resource.Piece(**piece) for piece in resource_json['pieces']]
+    resource = Resource(
+        tracker_ip=resource_json['tracker_ip'],
+        tracker_port=resource_json['tracker_port'],
+        comment=resource_json['comment'],
+        creation_date=datetime.datetime.fromisoformat(resource_json['creation_date']),
+        name=resource_json['name'],
+        pieces=pieces
+    )
+    return resource
 
-async def shutdown():
-    ...
+# --- Torrent logic ---
+async def start_share_file(destination, resource: Resource):
+    '''
+    Function what starting sharing of file, and updating peer information
+    on tracker server
+    '''
+    peer_public_ip = get_peer_public_ip()
+    local_resource_manager = resource_manager.ResourceManager(peer_id, destination, resource)
+    resource_manager_dict[destination] = local_resource_manager
+    peer_public_port = await resource_manager_dict.get(destination).full_start()
+    resource_info_hash = resource.get_info_hash()
+    peer = {
+        "peerId": peer_id,
+        "infoHash": resource_info_hash,
+        "publicIp": peer_public_ip,
+        "publicPort": peer_public_port
+    }
+    tracker_url = f'http://{TRACKER_IP}:{TRACKER_PORT}/peers'
 
-async def get_files():
-    ...
+    async def parse_peer_list(json_text):
+        '''
+        Function what parse json text and return list of peerInfo elements
+        '''
+        peer_list = []
 
-async def update_file(file_name):
-    ...
+        try:
+            data = json.loads(json_text)
+            resource_info_hash = resource.get_info_hash()
+            for peer in data.get("peers", []):
+                if peer.get("infoHash") == resource_info_hash:
+                    peer_info = PeerInfo(
+                        public_ip=peer["publicIp"],
+                        public_port=int(peer["publicPort"]),
+                        peer_id=peer["peerId"]
+                    )
+                    peer_list.append(peer_info)
+        except (json.JSONDecodeError, KeyError, ValueError) as e:
+            print(f"Error parsing peer list: {e}")
 
-async def update_files():
-    ...
+        await resource_manager_dict.get(destination).submit_peers(peer_list)
 
-async def get_file_info(url):
-    ...
+    task = asyncio.create_task((heart_beat(tracker_url, peer, parse_peer_list)))
 
-async def add_torrent(file_info):
-    ...
+async def stop_share_file(destination):
+    await resource_manager_dict.get(destination).stop_sharing_file()
 
-async def remove_torrent(file_name):
-    ...
+async def start_download_file(destination, resource: Resource):
+    '''
+    Function what starting downloading of file, and updating peer information
+    on tracker server
+    '''
+    peer_public_ip = get_peer_public_ip()
+    local_resource_manager = resource_manager.ResourceManager(peer_id, destination, resource)
+    resource_manager_dict[destination] = local_resource_manager
+    peer_public_port = await resource_manager_dict.get(destination).full_start()
+    resource_info_hash = resource.get_info_hash()
+    peer = {
+        "peerId": peer_id,
+        "infoHash": resource_info_hash,
+        "publicIp": peer_public_ip,
+        "publicPort": peer_public_port
+    }
 
-def get_mock_content(source):
-    ...
+    task = asyncio.create_task(await resource_manager_dict.get(destination).start_download())
+
+async def stop_download_file(destination):
+    '''
+    Function what stopping downloading of file, and updating peer information
+    on tracker server
+    '''
+    await resource_manager_dict.get(destination).stop_download()
+
+
+async def get_state(destination):
+    '''
+    Function what starting downloading of file, and updating peer information
+    on tracker server
+    '''
+
+    return await resource_manager_dict.get(destination).get_state()

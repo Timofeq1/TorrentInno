@@ -2,7 +2,7 @@ import requests
 import time
 import asyncio
 
-async def update_peer(server_url,peer) -> str:
+def update_peer(server_url,peer) -> str:
     '''
     Using post requests create or update peer information on tracker server
     '''
@@ -16,3 +16,9 @@ async def update_peer(server_url,peer) -> str:
     except requests.exceptions.RequestException as e:
         print(f"Error updating peer: {e}")
         return ''
+
+async def heart_beat(server_url, peer, on_tracker_responce) -> str:
+   while True:
+       responce_text = update_peer(server_url, peer)
+       on_tracker_responce(responce_text)
+       await asyncio.sleep(30)
