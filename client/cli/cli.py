@@ -1,7 +1,9 @@
 import asyncio
+import logging
 from pathlib import Path
 import json
 import shlex
+import threading
 
 from core.common.resource import Resource
 from torrentInno import TorrentInno, create_resource_json, create_resource_from_json
@@ -20,7 +22,7 @@ def get_help_message() -> str:
 
         '"share <path-to-file> <resource-file.json>" - '
         'start sharing the existing <path-to-file> with other peers. The <resource-file.json> '
-        'is the metadata of the filet\n'
+        'is the metadata of the file\n'
 
         '"show all" - show the status of all files\n'
 
@@ -37,22 +39,40 @@ def create_resource_from_file(file: Path) -> Resource:
         return create_resource_from_json(resource_json)
 
 
+def _run_event_loop(loop):
+    asyncio.set_event_loop(loop)
+    loop.run_forever()
+
+
+def setup_logging():
+    log_file = Path(__file__).parent.joinpath('cli_logs.log')
+    logging.basicConfig(
+        level=logging.DEBUG,
+        filename=log_file
+    )
+
+
 class Client:
     def __init__(self):
-        self.torrent_inno: TorrentInno = None  # TODO: initialize in start()
+        setup_logging()
 
-    async def start(self):
+        self.torrent_inno: TorrentInno = TorrentInno()
+        self.loop = asyncio.new_event_loop()
+        self.background_thread = threading.Thread(target=_run_event_loop, args=(self.loop,))
+        self.background_thread.start()
+
+    def start(self):
         print(
             "Welcome to TorrentInno CLI\n"
             "Type \"help\" to display the help message\n"
             "To exit type \"quit\""
         )
         try:
-            await self.infinite_loop()
+            self.infinite_loop()
         except KeyboardInterrupt:
             print("Quitting")
 
-    async def infinite_loop(self):
+    def infinite_loop(self):
         while True:
             print(">", end=' ')
             line = input()
@@ -74,14 +94,21 @@ class Client:
                         print(f"The {destination} already exists. Abort download")
                         continue
                     resource = create_resource_from_file(resource_file)
-                    await self.torrent_inno.start_download_file(destination.resolve(), resource)
+                    asyncio.run_coroutine_threadsafe(
+                        self.torrent_inno.start_download_file(destination.resolve(), resource),
+                        self.loop
+                    )
                     print(f"Start downloading a file into {destination.resolve()}")
                 except Exception as e:
                     print(f"Download failed: {e}")
 
             elif len(tokens) == 2 and tokens[0] == "show" and tokens[1] == "all":
                 try:
-                    states = await self.torrent_inno.get_all_files_state()
+                    states = asyncio.run_coroutine_threadsafe(
+                        self.torrent_inno.get_all_files_state(),
+                        self.loop
+                    ).result()
+
                     for state in states:
                         print(state)
                 except Exception as e:
@@ -94,8 +121,12 @@ class Client:
                     if not destination.exists():
                         print(f"The {destination} does not exist. Abort share")
                         continue
+
                     resource = create_resource_from_file(resource_file)
-                    await self.torrent_inno.start_share_file(destination.resolve(), resource)
+                    asyncio.run_coroutine_threadsafe(
+                        self.torrent_inno.start_share_file(destination.resolve(), resource),
+                        self.loop
+                    )
                     print(f"Start sharing file at {destination}")
                 except Exception as e:
                     print(f"Share failed: {e}")
@@ -103,10 +134,13 @@ class Client:
             elif tokens[0] == "show":
                 try:
                     destination = Path(tokens[1]).expanduser()
-                    state = await self.torrent_inno.get_state(destination.resolve())
+                    state = asyncio.run_coroutine_threadsafe(
+                        self.torrent_inno.get_state(destination.resolve()),
+                        self.loop
+                    ).result()
                     print(state)
                 except Exception as e:
-                    print(f"Fail when fetching the status of file at {tokens[0]}: {e}")
+                    print(f"Fail when fetching the status of file at {tokens[1]}: {e}")
 
             elif len(tokens) == 4 and tokens[0] == "generate" and tokens[1] == "resource":
                 try:
@@ -126,7 +160,13 @@ class Client:
                     print("Enter the name of the resource file: ")
                     name = input()
 
-                    resource_json = create_resource_json(name=name, comment=comment, file_path=file)
+                    resource_json = create_resource_json(
+                        name=name,
+                        comment=comment,
+                        file_path=file,
+                        min_piece_size=1000 * 1000,
+                        max_pieces=1000
+                    )
                     with open(resource_file, mode='w') as f:
                         json.dump(resource_json, f, indent=4, ensure_ascii=False)
                     print("Successfully created")
@@ -139,6 +179,6 @@ class Client:
 def main():
     try:
         client = Client()
-        asyncio.run(client.start())
+        client.start()
     except Exception as e:
         print("Quitting")
