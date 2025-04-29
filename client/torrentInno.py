@@ -40,14 +40,12 @@ def get_peer_public_ip():
     ip = socket.gethostbyname(hostname)
     return ip
 
-<<<<<<< Updated upstream
+
 TRACKER_IP = '80.71.232.39'
 TRACKER_PORT = '8080'
 peer_id = generate_peer_id()
 resource_manager_dict: Dict[str, ResourceManager] = {}
 
-=======
->>>>>>> Stashed changes
 def create_resource_json(name: str, comment: str, file_path, piece_size: int = 1024 * 1024):
     '''
     Create a resource by splitting the file into multiple pieces.
