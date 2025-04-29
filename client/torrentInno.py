@@ -9,6 +9,7 @@ import os
 import hashlib
 from typing import Dict
 
+from core.p2p.resource_manager import ResourceManager
 from core.s2p.server_manager import update_peer
 from core.p2p import resource_manager
 from core.s2p.server_manager import heart_beat
@@ -40,7 +41,7 @@ def get_peer_public_ip():
 TRACKER_IP = '80.71.232.39'
 TRACKER_PORT = '8080'
 peer_id = generate_peer_id()
-resource_manager_dict: Dict[str, Resource] = {}
+resource_manager_dict: Dict[str, ResourceManager] = {}
 
 def create_resource_json(name: str, comment: str, file_path, piece_size: int = 1024 * 1024):
     '''
