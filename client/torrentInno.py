@@ -175,7 +175,11 @@ class TorrentInno:
         task = asyncio.create_task(heart_beat(tracker_url, peer, parse_peer_list))
 
     async def stop_share_file(self, destination):
+        '''
+        Function what stopping sharing of file, and updating peer information
+        '''
         await self.resource_manager_dict.get(destination).stop_sharing_file()
+        await self.resource_manager_dict.get(destination).shutdown()
         del self.resource_manager_dict[destination]
 
 
@@ -235,6 +239,7 @@ class TorrentInno:
         on tracker server
         '''
         await self.resource_manager_dict.get(destination).stop_download()
+        await self.resource_manager_dict.get(destination).shutdown()
         del self.resource_manager_dict[destination]
 
     async def get_state(self, destination):
@@ -290,5 +295,5 @@ class TorrentInno:
         '''
         Function what removing file from torrent
         '''
-        self.resource_manager_dict.get(destination).shutdown()
+        await self.resource_manager_dict.get(destination).shutdown()
         del self.resource_manager_dict[destination]
