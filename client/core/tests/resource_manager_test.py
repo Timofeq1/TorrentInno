@@ -30,8 +30,16 @@ async def create_peer(peer_id: str, destination: Path, resource) -> tuple[PeerIn
     return peer_info, resource_manager
 
 
+def setup_logging():
+    log_file = Path(__file__).parent.joinpath("resource_manager_test.log")
+    logging.basicConfig(
+        filename=log_file,
+        level=logging.DEBUG
+    )
+
+
 async def main():
-    logging.basicConfig(level=logging.INFO)
+    setup_logging()
 
     # Temporary directory and necessary file tree manipulations
     tmp = Path(__file__).parent.joinpath('tmp')
@@ -45,7 +53,7 @@ async def main():
     source_peer_id = random_peer_id()
     source_peer_destination = tmp.joinpath('source', 'data')
     source_peer_destination.parent.mkdir(parents=True)
-    piece_sizes = [random.randint(5 * 10 ** 5, 10 ** 6) for _ in range(100)]
+    piece_sizes = [random.randint(5 * 10 ** 5, 10 ** 6) for _ in range(10)]
     offset = [0] + list(accumulate(piece_sizes))
 
     with open(source_peer_destination, mode='wb') as file:

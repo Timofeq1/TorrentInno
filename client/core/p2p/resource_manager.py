@@ -217,13 +217,6 @@ class ResourceManager:
             self._network_stats.last_drop_timestamp_seconds = time.time()
             self._network_stats.bytes_downloaded_since_last_drop = 0
             self._network_stats.bytes_uploaded_since_last_drop = 0
-
-            logging.info(
-                self._log_prefix(f"Download speed: {self._network_stats.prev_download_bytes_per_sec // 1000} kb/sec")
-            )
-            logging.info(
-                self._log_prefix(f"Upload speed: {self._network_stats.prev_upload_bytes_per_sec // 1000} kb/sec")
-            )
             await asyncio.sleep(2)
 
     def __init__(
@@ -317,6 +310,7 @@ class ResourceManager:
         if self._broadcast_task is None:
             self._broadcast_task = asyncio.create_task(self._periodic_broadcast())
 
+        logging.info(self._log_prefix(f'Open public port {port}'))
         # Return port on which connection has been opened
         return port
 
