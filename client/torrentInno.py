@@ -102,6 +102,7 @@ class TorrentInno:
         piece_status: list[bool]
         upload_speed_bytes_per_sec: int
         download_speed_bytes_per_sec: int
+        destination: str
 
     def __init__(self):
         self.peer_id = generate_peer_id()
@@ -230,8 +231,9 @@ class TorrentInno:
         states: ResourceManager.State  = await self.resource_manager_dict.get(destination).get_state()
 
         return self.State(states.piece_status,
-                                  states.upload_speed_bytes_per_sec,
-                                  states.download_speed_bytes_per_sec)
+                          states.upload_speed_bytes_per_sec,
+                          states.download_speed_bytes_per_sec,
+                          destination)
 
     async def get_all_files_state(self):
         '''
@@ -240,7 +242,13 @@ class TorrentInno:
         return_list = []
 
         for key in self.resource_manager_dict.keys():
-            return_list.append((key, await self.resource_manager_dict.get(key).get_state()))
+            state = await self.resource_manager_dict.get(key).get_state()
+            return_list.append((key, self.State(
+                state.piece_status,
+                state.upload_speed_bytes_per_sec,
+                state.download_speed_bytes_per_sec,
+                key
+            )))
 
         return return_list
 
