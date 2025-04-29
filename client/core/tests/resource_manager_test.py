@@ -1,90 +1,108 @@
 import asyncio
-import datetime
 import hashlib
+import datetime
+from itertools import accumulate
 from pathlib import Path
 import random
 import shutil
 import logging
+import time
+import aiofiles
 
 from core.common.peer_info import PeerInfo
 from core.common.resource import Resource
 from core.p2p.resource_manager import ResourceManager
 
 
-def random_bits(size) -> bytes:
+def random_bytes(size) -> bytes:
     return bytes(random.randint(0, 255) for _ in range(size))
 
 
 def random_peer_id() -> str:
-    return random_bits(32).hex()
+    return random_bytes(32).hex()
+
+
+async def create_peer(peer_id: str, destination: Path, resource) -> tuple[PeerInfo, ResourceManager]:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    resource_manager = ResourceManager(peer_id, destination, resource)
+    port = await resource_manager.full_start()
+    peer_info = PeerInfo('127.0.0.1', port, peer_id)
+    return peer_info, resource_manager
 
 
 async def main():
-    logging.basicConfig(level=logging.DEBUG)
+    logging.basicConfig(level=logging.INFO)
 
-    # Temporary directory
+    # Temporary directory and necessary file tree manipulations
     tmp = Path(__file__).parent.joinpath('tmp')
     shutil.rmtree(tmp, ignore_errors=True)
     tmp.mkdir(parents=True)
 
-    # Generate stub data
-    data: list[bytes] = [random_bits(random.randint(100, 1000)) for _ in range(10)]
-    pieces: list[Resource.Piece] = [
-        Resource.Piece(
-            sha256=hashlib.sha256(piece_data).hexdigest(),
-            size_bytes=len(piece_data)
-        )
-        for piece_data in data
-    ]
+    # Make the randomizer deterministic
+    random.seed(0)
+
+    # Generate the initial file
+    source_peer_id = random_peer_id()
+    source_peer_destination = tmp.joinpath('source', 'data')
+    source_peer_destination.parent.mkdir(parents=True)
+    piece_sizes = [random.randint(5 * 10 ** 5, 10 ** 6) for _ in range(100)]
+    offset = [0] + list(accumulate(piece_sizes))
+
+    with open(source_peer_destination, mode='wb') as file:
+        file.seek(offset[-1] - 1)
+        file.write(b'\0')
+
+    print("Start generating file...")
+    pieces = []
+    async with aiofiles.open(source_peer_destination, mode='r+b') as file:
+        for i in range(len(piece_sizes)):
+            await file.seek(offset[i])
+            arr = random_bytes(min(100, piece_sizes[i]))
+            data = arr * (piece_sizes[i] // len(arr)) + b'\0' * (piece_sizes[i] % len(arr))
+            assert len(data) == piece_sizes[i]
+            piece = Resource.Piece(
+                sha256=hashlib.sha256(data).hexdigest(),
+                size_bytes=len(data)
+            )
+            pieces.append(piece)
+            await file.write(data)
+
+    assert source_peer_destination.stat().st_size == offset[-1]
+
     resource = Resource(
         tracker_ip='0.0.0.0',
         tracker_port=8080,
         comment='Test file',
-        creation_date=datetime.datetime.now(),
+        creation_date=datetime.datetime(year=2000, month=1, day=1, hour=1, minute=1, second=1),
         name='Random testing file',
         pieces=pieces
     )
 
-    # Write the stub data to file
-    source_file = tmp.joinpath(resource.name)
-    with open(source_file, mode='wb') as f:
-        for piece_data in data:
-            f.write(piece_data)
+    source_peer_info, source_resource_manager = await create_peer(
+        source_peer_id,
+        source_peer_destination,
+        resource
+    )
 
-    # Set up source peer_id. This can be used as an example of working with ResourceManager
-    source_peer_id = random_peer_id() # peer_id is unique PER PEER (not per ResourceManager)
-    source_destination = source_file
-    source_resource_manager = ResourceManager(source_peer_id, source_destination, resource)
-    source_port = await source_resource_manager.open_public_port()
-    await source_resource_manager.start_sharing_file()
-    source_peer_info = PeerInfo('127.0.0.1', source_port, source_peer_id)
-
+    # Now create consumer peers
     consumer_peer_ids = [random_peer_id() for _ in range(5)]
-    consumer_destinations = [tmp.joinpath(peer_id, resource.name) for peer_id in consumer_peer_ids]
-    for consumer_destination in consumer_destinations:
-        consumer_destination.parent.mkdir(parents=True)
-
-    consumer_resource_managers = [
-        ResourceManager(consumer_peer_id, consumer_destination, resource)
-        for consumer_peer_id, consumer_destination in zip(consumer_peer_ids, consumer_destinations)
+    consumer_destinations = [
+        tmp.joinpath(consumer_peer_id, resource.name)
+        for consumer_peer_id in consumer_peer_ids
     ]
-    for consumer_resource_manager in consumer_resource_managers:
-        await consumer_resource_manager.start_sharing_file()
-    consumer_ports = [
-        await resource_manager.open_public_port()
-        for resource_manager in consumer_resource_managers
+    consumer_tuples = [
+        await create_peer(
+            consumer_peer_id,
+            consumer_destination,
+            resource
+        ) for consumer_peer_id, consumer_destination in zip(consumer_peer_ids, consumer_destinations)
     ]
-    consumer_peer_infos = [
-        PeerInfo('127.0.0.1', port, peer_id)
-        for port, peer_id in zip(consumer_ports, consumer_peer_ids)
-    ]
+    consumer_peer_infos = [t[0] for t in consumer_tuples]
+    consumer_resource_managers = [t[1] for t in consumer_tuples]
 
-    all_peer_infos = consumer_peer_infos + [source_peer_info]
+    all_peer_infos = [source_peer_info] + consumer_peer_infos
 
-    for resource_manager in consumer_resource_managers:
-        await resource_manager.start_download()
-
-    # For all the peers, submit the PeerInfo list
+    # Submit the info about peers to all peers
     await asyncio.gather(
         source_resource_manager.submit_peers(all_peer_infos),
         *(
@@ -93,7 +111,6 @@ async def main():
         )
     )
 
-    # ...watch the peers talking!
 
 if __name__ == "__main__":
     try:
@@ -105,4 +122,3 @@ if __name__ == "__main__":
         pass
         tmp = Path(__file__).parent.joinpath('tmp')
         shutil.rmtree(tmp)
-

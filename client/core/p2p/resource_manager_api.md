@@ -9,7 +9,9 @@ def __init__(
         resource: Resource,
 ):
     """
-    Create a new ResourceManager instance
+    Create a new ResourceManager instance. 
+    IMPORTANT: For pair (destination, resource) there MUST be only one instance of (running) `ResourceManager`. 
+    Otherwise, the whole behaviour is undefined. 
 
     :param host_peer_id: the peer_id that will host the resource
     :param destination: The destination of the file on the filesystem. Important: if the destination exists
@@ -22,19 +24,31 @@ def __init__(
 ## Public methods:
 ### The most useful ones:
 ```python
-async def full_start(self) -> int:
+async def full_start(
+        self,
+        restore_previous=True,
+        start_sharing_file=True,
+        start_download=True,
+        open_public_port=True
+) -> int | None:
     """
-    A convenience methods that automatically opens the public port of the resource manager,
-    starts download, attempt to restore the previous download state etc.
+    A method to start the `ResourceManager`. Clients MUST call this method in order to fully start the `ResourceManager`.
+    The method has a bunch of flags that allow clients to adjust the parameters of `ResourceManager`
+    at the beginning. Any disabled flag can be enabled later by calling the appropriate public method.
 
-    :return: the same as `open_public_port()`
+    The method is not guaranteed to be idempotent (i.e. repeating calls of `full_start()` to the
+    running ResourceManager may cause exceptions/various errors).
+
+    :return: if `open_public_port` is True then  the return value is the same as `open_public_port()` otherwise None
     """
-    ...
 ```
 ```python
 async def shutdown(self):
     """
-    A convenience method that is the opposite of `full_start()` (i.e. close everything that was started/launched)
+    A method to stop the running `ResourceManager`. The clients MUST call this method in order to fully stop the
+    running `ResourceManager` and release all associated resources.
+
+    The method is idempotent (repeating calls do not cause any errors/exception)
     """
     ...
 ```
