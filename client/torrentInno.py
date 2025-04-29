@@ -6,6 +6,7 @@ import datetime
 import os
 import hashlib
 import math
+import logging
 
 from typing import Dict
 from pathlib import Path
@@ -19,6 +20,8 @@ from core.common.resource import Resource
 # --- constants ---
 TRACKER_IP = '80.71.232.39'
 TRACKER_PORT = 8080
+
+logging.basicConfig(level=logging.INFO)
 
 # --- utility functions ---
 
@@ -76,7 +79,7 @@ def create_resource_json(name: str, comment: str, file_path, max_pieces: int = 1
         'pieces': pieces
     }
 
-    print(f"Adaptive split: {len(pieces)} pieces, piece size: {piece_size} bytes")
+    logging.info(f"Adaptive split: {len(pieces)} pieces, piece size: {piece_size} bytes")
     return resource_json
 
 
@@ -133,7 +136,7 @@ class TorrentInno:
             peer_list = []
 
             if not json_text.strip():
-                print("Error parsing peer list: Response is empty")
+                logging.info("Error parsing peer list: Response is empty")
                 return
 
             try:
@@ -148,9 +151,9 @@ class TorrentInno:
                         )
                         peer_list.append(peer_info)
             except (json.JSONDecodeError, KeyError, ValueError) as e:
-                print(f"Error parsing peer list: {e}")
-            print("Share peer list:")
-            print(peer_list)
+                logging.info(f"Error parsing peer list: {e}")
+            logging.info("Share peer list:")
+            logging.info(peer_list)
             await self.resource_manager_dict.get(destination).submit_peers(peer_list)
 
         task = asyncio.create_task(heart_beat(tracker_url, peer, parse_peer_list))
@@ -186,7 +189,7 @@ class TorrentInno:
         async def parse_peer_list(json_text):
             peer_list = []
             if not json_text.strip():
-                print("Error parsing peer list: Response is empty")
+                logging.info("Error parsing peer list: Response is empty")
                 return
 
             try:
@@ -201,14 +204,14 @@ class TorrentInno:
                         )
                         peer_list.append(peer_info)
             except (json.JSONDecodeError, KeyError, ValueError) as e:
-                print(f"Error parsing peer list: {e}")
+                logging.info(f"Error parsing peer list: {e}")
 
             filtered_peers = [p for p in peer_list if p.peer_id != self.peer_id]
             await self.resource_manager_dict.get(destination).submit_peers(filtered_peers)
             if filtered_peers:
                 peers_ready.set()
-            print('download peer list:')
-            print(filtered_peers)
+            logging.info('download peer list:')
+            logging.info(filtered_peers)
 
         task = asyncio.create_task(heart_beat(tracker_url, peer, parse_peer_list))
         await peers_ready.wait()
