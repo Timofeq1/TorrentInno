@@ -9,10 +9,11 @@ dependencies = [
     "requests (>=2.32.3,<3.0.0)"
 ]
 
+[tool.poetry.scripts]
+cli = "cli.cli:main"
 
 [tool.poetry]
-package-mode = false
-
+packages = [{ include = "cli" }]
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.5"
