@@ -102,30 +102,11 @@ class TorrentInno:
         piece_status: list[bool]
         upload_speed_bytes_per_sec: int
         download_speed_bytes_per_sec: int
+        destination: str
 
     def __init__(self):
         self.peer_id = generate_peer_id()
         self.resource_manager_dict: Dict[str, ResourceManager] = {}
-        state_file = "last_used.json"
-        if os.path.exists(state_file):
-            with open(state_file, 'r', encoding='utf-8') as f:
-                state_dict = json.load(f)
-            for key, entry in state_dict.items():
-                resource_data = entry['resource']
-                pieces = [
-                    Resource.Piece(sha256=piece['sha256'], size_bytes=piece['size_bytes'])
-                    for piece in resource_data['pieces']
-                ]
-                resource = Resource(
-                    tracker_ip=resource_data['tracker_ip'],
-                    tracker_port=resource_data['tracker_port'],
-                    comment=resource_data['comment'],
-                    creation_date=resource_data['creation_date'],
-                    name=resource_data['name'],
-                    pieces=pieces
-                )
-                manager = ResourceManager(self.peer_id, Path(key), resource)
-                self.resource_manager_dict[key] = manager
 
     async def start_share_file(self, destination, resource: Resource):
         '''
@@ -175,7 +156,11 @@ class TorrentInno:
         task = asyncio.create_task(heart_beat(tracker_url, peer, parse_peer_list))
 
     async def stop_share_file(self, destination):
+        '''
+        Function what stopping sharing of file, and updating peer information
+        '''
         await self.resource_manager_dict.get(destination).stop_sharing_file()
+        await self.resource_manager_dict.get(destination).shutdown()
         del self.resource_manager_dict[destination]
 
 
@@ -235,6 +220,7 @@ class TorrentInno:
         on tracker server
         '''
         await self.resource_manager_dict.get(destination).stop_download()
+        await self.resource_manager_dict.get(destination).shutdown()
         del self.resource_manager_dict[destination]
 
     async def get_state(self, destination):
@@ -245,8 +231,9 @@ class TorrentInno:
         states: ResourceManager.State  = await self.resource_manager_dict.get(destination).get_state()
 
         return self.State(states.piece_status,
-                                  states.upload_speed_bytes_per_sec,
-                                  states.download_speed_bytes_per_sec)
+                          states.upload_speed_bytes_per_sec,
+                          states.download_speed_bytes_per_sec,
+                          destination)
 
     async def get_all_files_state(self):
         '''
@@ -255,40 +242,19 @@ class TorrentInno:
         return_list = []
 
         for key in self.resource_manager_dict.keys():
-            return_list.append((key, await self.resource_manager_dict.get(key).get_state()))
+            state = await self.resource_manager_dict.get(key).get_state()
+            return_list.append((key, self.State(
+                state.piece_status,
+                state.upload_speed_bytes_per_sec,
+                state.download_speed_bytes_per_sec,
+                key
+            )))
 
         return return_list
-
-    async def exit_with_saving_state(self):
-        '''
-        Save the state and resource info of all resource managers to a file.
-        '''
-        state_dict = {}
-        for key, manager in self.resource_manager_dict.items():
-            state = await manager.get_state()
-            if hasattr(state, '__dict__'):
-                state = state.__dict__
-            resource = manager.resource
-            if hasattr(resource, '__dict__'):
-                resource_dict = resource.__dict__.copy()
-                if 'pieces' in resource_dict:
-                    resource_dict['pieces'] = [
-                        piece.__dict__ if hasattr(piece, '__dict__') else piece
-                        for piece in resource_dict['pieces']
-                    ]
-            else:
-                resource_dict = str(resource)
-            state_dict[str(key)] = {
-                'state': state,
-                'resource': resource_dict
-            }
-
-        with open("last_used.json", 'w', encoding='utf-8') as f:
-            json.dump(state_dict, f, ensure_ascii=False, indent=4)
 
     async def remove_from_torrent(self , destination):
         '''
         Function what removing file from torrent
         '''
-        self.resource_manager_dict.get(destination).shutdown()
+        await self.resource_manager_dict.get(destination).shutdown()
         del self.resource_manager_dict[destination]
