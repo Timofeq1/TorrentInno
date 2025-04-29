@@ -1,10 +1,14 @@
 import asyncio
 import logging
+import sys
+import time
 from pathlib import Path
 import json
 import shlex
 import threading
+import os
 
+import torrentInno
 from core.common.resource import Resource
 from torrentInno import TorrentInno, create_resource_json, create_resource_from_json
 
@@ -48,14 +52,14 @@ def setup_logging():
     log_file = Path(__file__).parent.joinpath('cli_logs.log')
     logging.basicConfig(
         level=logging.DEBUG,
-        filename=log_file
+        filename=log_file,
+        force=True
     )
 
 
 class Client:
     def __init__(self):
         setup_logging()
-
         self.torrent_inno: TorrentInno = TorrentInno()
         self.loop = asyncio.new_event_loop()
         self.background_thread = threading.Thread(target=_run_event_loop, args=(self.loop,))
@@ -80,10 +84,6 @@ class Client:
                 print(get_help_message())
                 continue
 
-            if line == "quit":
-                print("Quitting")
-                break
-
             tokens = shlex.split(line)
 
             if tokens[0] == "download":
@@ -104,13 +104,20 @@ class Client:
 
             elif len(tokens) == 2 and tokens[0] == "show" and tokens[1] == "all":
                 try:
-                    states = asyncio.run_coroutine_threadsafe(
+                    states: list[TorrentInno.State] = asyncio.run_coroutine_threadsafe(
                         self.torrent_inno.get_all_files_state(),
                         self.loop
                     ).result()
 
-                    for state in states:
-                        print(state)
+                    for key, state in states:
+                        all_pieces = len(state.piece_status)
+                        saved_pieces = sum(state.piece_status)
+                        print(
+                            f'Destination: {state.destination}\n'
+                            f'Upload speed {state.upload_speed_bytes_per_sec / 10 ** 6:.2f} mb/sec\n'
+                            f'Download speed {state.download_speed_bytes_per_sec / 10 ** 6:.2f} mb/sec\n'
+                            f'Downloaded {saved_pieces}/{all_pieces} pieces\n'
+                        )
                 except Exception as e:
                     print(f"Something went wrong: {e}")
 
@@ -134,11 +141,41 @@ class Client:
             elif tokens[0] == "show":
                 try:
                     destination = Path(tokens[1]).expanduser()
-                    state = asyncio.run_coroutine_threadsafe(
-                        self.torrent_inno.get_state(destination.resolve()),
-                        self.loop
-                    ).result()
-                    print(state)
+
+                    while True:
+                        # Get the state asynchronously
+                        state: TorrentInno.State = asyncio.run_coroutine_threadsafe(
+                            self.torrent_inno.get_state(destination.resolve()),
+                            self.loop
+                        ).result()
+
+                        # Convert speed to MB (1 MB = 10^6 bytes)
+                        upload_speed_mb = state.upload_speed_bytes_per_sec / 10 ** 6
+                        download_speed_mb = state.download_speed_bytes_per_sec / 10 ** 6
+
+                        # Create the saved_chunks string
+                        saved_pieces = ''.join('#' if piece else '.' for piece in state.piece_status)
+
+                        # Clear the terminal
+                        os.system('cls' if os.name == 'nt' else 'clear')
+
+                        print(
+                            f"Destination: {state.destination}" + " " * 20
+                        )  # Add padding to clear longer previous lines
+                        print(
+                            f"Upload speed: {upload_speed_mb:.2f} mb/sec" + " " * 20
+                        )
+                        print(
+                            f"Download speed: {download_speed_mb:.2f} mb/sec" + " " * 20
+                        )
+                        print(
+                            f"Saved pieces: {saved_pieces}" + " " * 20
+                        )
+
+                        # Wait before updating again
+                        time.sleep(0.5)
+                except KeyboardInterrupt as e:
+                    pass # Ignore keyboard interrupt and simply continue
                 except Exception as e:
                     print(f"Fail when fetching the status of file at {tokens[1]}: {e}")
 
@@ -164,7 +201,7 @@ class Client:
                         name=name,
                         comment=comment,
                         file_path=file,
-                        min_piece_size=1000 * 1000,
+                        min_piece_size=64 * 1000,
                         max_pieces=1000
                     )
                     with open(resource_file, mode='w') as f:
