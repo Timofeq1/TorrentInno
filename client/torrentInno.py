@@ -111,7 +111,7 @@ class TorrentInno:
         self.peer_id = generate_peer_id()
         self.resource_manager_dict: Dict[str, ResourceManager] = {}
 
-    async def start_share_file(self, destination, resource: Resource):
+    async def start_share_file(self, destination: str, resource: Resource):
         '''
         Function what starting sharing of file, and updating peer information
         on tracker server
@@ -158,7 +158,7 @@ class TorrentInno:
 
         task = asyncio.create_task(heart_beat(tracker_url, peer, parse_peer_list))
 
-    async def stop_share_file(self, destination):
+    async def stop_share_file(self, destination: str):
         '''
         Function what stopping sharing of file, and updating peer information
         '''
@@ -167,7 +167,7 @@ class TorrentInno:
         del self.resource_manager_dict[destination]
 
 
-    async def start_download_file(self, destination, resource: Resource):
+    async def start_download_file(self, destination: str, resource: Resource):
         '''
         Function what starting downloading of file, and updating peer information
         '''
@@ -217,7 +217,7 @@ class TorrentInno:
         await peers_ready.wait()
         await self.resource_manager_dict.get(destination).start_download()
 
-    async def stop_download_file(self, destination):
+    async def stop_download_file(self, destination: str):
         '''
         Function what stopping downloading of file, and updating peer information
         on tracker server

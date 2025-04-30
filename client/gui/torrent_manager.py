@@ -16,11 +16,11 @@ from core.common.resource import Resource
 TORRENT_STATE_FILE = 'torrent_state.json'
 
 # Настройка логирования
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 
 # Глобальные переменные
 _active_torrents = []
-_torrent_inno = None
+_torrent_inno: TorrentInno | None = None
 _loop = None
 _background_thread = None
 
@@ -105,10 +105,11 @@ def _convert_state_to_file_info(state, file_path):
     
     # Определяем тип файла по расширению
     file_ext = file_name.split('.')[-1] if '.' in file_name else 'unknown'
-    
+
     # Вычисляем общий размер файла
-    total_size = sum(piece.size for piece in state.piece_status)
-    
+    resource: Resource = _torrent_inno.resource_manager_dict[str(Path(file_path).resolve())].resource
+    total_size: int = sum(piece.size_bytes for piece in resource.pieces)
+
     # Форматируем размер файла
     if total_size < 1024:
         size_str = f"{total_size} B"
@@ -118,7 +119,7 @@ def _convert_state_to_file_info(state, file_path):
         size_str = f"{total_size / (1024 * 1024):.2f} MB"
     else:
         size_str = f"{total_size / (1024 * 1024 * 1024):.2f} GB"
-    
+
     # Конвертируем скорость в удобный формат
     download_speed = state.download_speed_bytes_per_sec
     upload_speed = state.upload_speed_bytes_per_sec
@@ -136,7 +137,7 @@ def _convert_state_to_file_info(state, file_path):
         upload_speed_str = f"{upload_speed / 1024:.1f}KB/s"
     else:
         upload_speed_str = f"{upload_speed / (1024 * 1024):.1f}MB/s"
-    
+
     # Создаем блоки для отображения прогресса
     blocks = [1 if piece else 0 for piece in state.piece_status]
     
@@ -154,7 +155,7 @@ def _convert_state_to_file_info(state, file_path):
     # Если блоков меньше 20, дополняем до 20
     while len(blocks) < 20:
         blocks.append(0)
-    
+
     return {
         'name': file_name,
         'size': size_str,
@@ -189,10 +190,11 @@ def update_files():
     global _active_torrents
     
     try:
+
         # Получаем состояние всех файлов
         states_future = asyncio.run_coroutine_threadsafe(_get_all_states(), _loop)
         states = states_future.result(timeout=5.0)  # Ждем результат не более 5 секунд
-        
+
         # Обновляем информацию о файлах
         updated_files = []
         for file_path, state in states:
@@ -200,7 +202,7 @@ def update_files():
             updated_files.append(file_info)
             # Сохраняем путь к файлу
             _file_paths[file_info['name']] = file_path
-        
+
         _active_torrents = updated_files
         _save_torrent_state()
         
@@ -233,7 +235,7 @@ def create_resource_from_file(file_path, comment="", name=None):
         max_pieces=10000
     )
 
-def start_sharing_file(file_path, resource_json):
+def start_sharing_file(file_path: str, resource_json):
     """Начинает раздачу файла
     
     Args:
@@ -248,7 +250,7 @@ def start_sharing_file(file_path, resource_json):
     
     # Запускаем раздачу файла
     asyncio.run_coroutine_threadsafe(
-        _torrent_inno.start_share_file(Path(file_path).resolve(), resource),
+        _torrent_inno.start_share_file(str(Path(file_path).resolve()), resource),
         _loop
     )
     
@@ -256,6 +258,7 @@ def start_sharing_file(file_path, resource_json):
     file_name = os.path.basename(file_path)
     file_size = os.path.getsize(file_path)
     file_ext = file_name.split('.')[-1] if '.' in file_name else 'unknown'
+    file_ext = file_ext if file_ext in {'mp3', 'mp4', 'png', 'txt'} else 'unknown'
     
     # Форматируем размер файла
     if file_size < 1024:
@@ -299,7 +302,7 @@ def start_download_file(destination_path, resource_json):
     
     # Запускаем загрузку файла
     asyncio.run_coroutine_threadsafe(
-        _torrent_inno.start_download_file(Path(destination_path).resolve(), resource),
+        _torrent_inno.start_download_file(str(Path(destination_path).resolve()), resource),
         _loop
     )
     
@@ -358,7 +361,7 @@ def remove_torrent(index):
                 try:
                     # Пытаемся остановить раздачу файла
                     asyncio.run_coroutine_threadsafe(
-                        _torrent_inno.stop_share_file(Path(file_path).resolve()),
+                        _torrent_inno.stop_share_file(str(Path(file_path).resolve())),
                         _loop
                     ).result(timeout=5.0)
                 except Exception as e:
