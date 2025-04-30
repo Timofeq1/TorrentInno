@@ -78,7 +78,7 @@ class Client:
 
     def infinite_loop(self):
         while True:
-            print(">", end=' ')
+            print("\033[92mTorrentInno>\033[0m", end=' ')
             line = input()
             if line == "help":
                 print(get_help_message())
@@ -86,13 +86,21 @@ class Client:
 
             tokens = shlex.split(line)
 
+            if len(tokens) == 0:
+                continue
+
             if tokens[0] == "download":
                 try:
                     destination = Path(tokens[1]).expanduser()
                     resource_file = Path(tokens[2]).expanduser()
+
                     if destination.exists():
                         print(f"The {destination} already exists. Abort download")
                         continue
+                    if not destination.parent.exists():
+                        print(f"The parent folder {destination.parent} does not exist. Abort download")
+                        continue
+
                     resource = create_resource_from_file(resource_file)
                     asyncio.run_coroutine_threadsafe(
                         self.torrent_inno.start_download_file(destination.resolve(), resource),
@@ -176,6 +184,7 @@ class Client:
                         time.sleep(0.5)
                 except KeyboardInterrupt as e:
                     pass # Ignore keyboard interrupt and simply continue
+                    print() # Print the new line
                 except Exception as e:
                     print(f"Fail when fetching the status of file at {tokens[1]}: {e}")
 
@@ -201,8 +210,8 @@ class Client:
                         name=name,
                         comment=comment,
                         file_path=file,
-                        min_piece_size=64 * 1000,
-                        max_pieces=1000
+                        min_piece_size=1000 * 1000,
+                        max_pieces=10000
                     )
                     with open(resource_file, mode='w') as f:
                         json.dump(resource_json, f, indent=4, ensure_ascii=False)
