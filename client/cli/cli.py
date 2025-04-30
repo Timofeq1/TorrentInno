@@ -177,7 +177,7 @@ class Client:
                 except KeyboardInterrupt as e:
                     pass # Ignore keyboard interrupt and simply continue
                 except Exception as e:
-                    print(f"Fail when fetching the status of file at {tokens[1]}: {e}")
+                    print(f"Fail when fetching the status of file: {e}")
 
             elif len(tokens) == 4 and tokens[0] == "generate" and tokens[1] == "resource":
                 try:
