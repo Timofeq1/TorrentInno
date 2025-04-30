@@ -246,7 +246,6 @@ class MainScreen(Screen):
         self.file_manager = MDFileManager(
             exit_manager=self.exit_file_manager,
             select_path=self.select_file_to_share,
-            preview=True,
         )
         
         # Set the starting path to user's home directory
@@ -307,7 +306,6 @@ class MainScreen(Screen):
         self.json_file_manager = MDFileManager(
             exit_manager=self.exit_json_file_manager,
             select_path=self.select_json_file,
-            preview=True,
         )
         
         # Show the dialog
