@@ -184,7 +184,6 @@ class TorrentInno:
         }
 
         tracker_url = 'http://' + TRACKER_IP + f':{TRACKER_PORT}/peers'
-        peers_ready = asyncio.Event()
 
         async def parse_peer_list(json_text):
             peer_list = []
@@ -208,13 +207,10 @@ class TorrentInno:
 
             filtered_peers = [p for p in peer_list if p.peer_id != self.peer_id]
             await self.resource_manager_dict.get(destination).submit_peers(filtered_peers)
-            if filtered_peers:
-                peers_ready.set()
             logging.info('download peer list:')
             logging.info(filtered_peers)
 
         task = asyncio.create_task(heart_beat(tracker_url, peer, parse_peer_list))
-        await peers_ready.wait()
         await self.resource_manager_dict.get(destination).start_download()
 
     async def stop_download_file(self, destination: str):
