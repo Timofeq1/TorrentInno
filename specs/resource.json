@@ -1,0 +1,21 @@
+{
+    "trackerIp": "10.907.123.20",
+    "trackerPort": "3434",
+    "comment": "Video with Tralelelo Tralala",
+    "creationDate": "2000-10-31T01:30:00.000-05:00",
+    "name": "FunnyVideo.mp4",
+    "pieces": [
+        {
+            "sha256": "6b8a2d7f30c9e8d9b3d5b7c61e0be67d48280f58ffefae3c8b8423fe7108ecb",
+            "size": 1048576
+        },
+        {
+            "sha256": "aabf67d072b5124a8c618a125054ea92c79a0cc489fdbb2d8f9acb68e9d6fd6",
+            "size": 1048576
+        },
+        {
+            "sha256": "d432e67ffb96a5e742ab6d396bf52b41c4b960a5609871d4a477ad879d8a3c0",
+            "size": 26071
+        }
+    ]
+}
