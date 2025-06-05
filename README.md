@@ -15,6 +15,9 @@ A BitTorrent-inspired peer-to-peer file sharing system with:
 ## Project Documentation
 [View comprehensive project report](specs/TorrentInno.pdf)
 
+## Demo
+[![Demo](specs/Screenshot.png)](specs/Demo.mp4)
+
 ## Features
 - **Distributed File Sharing**: Direct peer-to-peer transfers
 - **Piece-based Transfers**: Parallel downloading/uploading
